@@ -18,10 +18,13 @@ ecosystem distributes Python and containers through different channels:
 | **`pidp11-addon/`**        | Supervisor add-on    | Docker container running SimH + PiDP-11 GPIO driver + `dropbear` SSH. Needs `/dev/mem`.      |
 | **`custom_components/pidp11/`** | HACS            | Python integration exposing HA entities/services that talk to the add-on.                     |
 
-On **HAOS / HA Supervised**, install both (the add-on handles the container,
-the integration handles HA wiring). On **HA Container** or **HA Core**, only
-the HACS integration is auto-installable; users must run the container
-themselves via `docker run` (see `docs/install-container.md`).
+## Supported targets
+
+**HAOS** and **HA Supervised** only. Both ship Supervisor, so both can
+install the add-on that runs the emulator container. HA Container and
+HA Core installs are **not supported** — they have no Supervisor and
+therefore no add-on channel. Users on those installs should move to
+HAOS or HA Supervised if they want to run PiDP-11.
 
 ## Quick install (HAOS, Pi 5 with PiDP-11 hat)
 

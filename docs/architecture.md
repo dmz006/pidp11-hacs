@@ -111,10 +111,17 @@ See `docs/diagrams.md` for rendered diagrams.
   network GPIO bridge; noted in `docs/roadmap.md` as R6.
 - VT11/Tektronix vector display emulation (upstream issue #14).
 
-## 7. Build & release model
+## 7. Supported targets
+
+**HAOS** and **HA Supervised** only. Both ship the Supervisor and can
+install the add-on that runs the emulator container. HA Container and
+HA Core are **not** supported targets — they do not have the Supervisor
+channel, and we will not ask users to run `docker run` by hand. This
+cuts the testing matrix and the documentation surface to one shape.
+
+## 8. Build & release model
 
 See `docs/testing-strategy.md` for CI details. Releases are cut on a
 merge to `main` after a green CI run + a completed hardware checklist
-signed in the release commit body. Multi-arch images go to
-`ghcr.io/<owner>/pidp11-addon-aarch64` (Pi 5 is aarch64-only; armv7 is
-not a target since users explicitly want Pi 5).
+signed in the release commit body. Images go to
+`ghcr.io/<owner>/pidp11-addon-aarch64` (Pi 5 is aarch64-only).

@@ -12,6 +12,13 @@ AGENT.md §7.
   add-on in `pidp11-addon/`, failing test stubs in `tests/`.
 - `LICENSE` (MIT), `hacs.json`, `repository.yaml`.
 
+### Changed
+- Scope narrowed: supported targets are **HAOS + HA Supervised only**.
+  HA Container / HA Core are explicitly out of scope; no `docker run`
+  or `docker-compose` install path ships. R7 retired in `docs/risks.md`.
+- AGENT.md no longer references the datawatch template; rules are
+  project-owned and self-contained.
+
 ### Open
 
 - R1: confirm `/dev/mem` access from HAOS add-ons on Pi 5.

@@ -33,7 +33,8 @@ S0 exit gate signed. R1 resolved (we know we can reach `/dev/mem`).
 5. **Remote-console auth shim.** Python 3 asyncio script,
    `authshim.py`, bound to `0.0.0.0:2223`, proxies to
    `127.0.0.1:2224` after `AUTH <secret>\n` handshake.
-6. **Multi-arch build.** `docker buildx build --platform linux/arm64,linux/amd64`.
+6. **Image build.** `docker buildx build --platform linux/arm64` (Pi 5
+   only; no other arch targets).
 
 ## Tests (moved red → green in this sprint)
 
@@ -46,8 +47,9 @@ S0 exit gate signed. R1 resolved (we know we can reach `/dev/mem`).
 
 ## Exit gate
 
-- `docker run` on aarch64 and amd64 produces a container that reaches
-  `healthy` within 30 s and answers `show cpu` on the remote console.
+- The add-on installed in a HAOS test environment (or a local
+  Supervisor dev box) reaches `healthy` within 30 s and answers
+  `show cpu` on the remote console.
 - `pytest -m addon` green on CI runner.
 - Dockerfile pinned to specific upstream SHA + specific SimH build
   flags.

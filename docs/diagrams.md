@@ -114,7 +114,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     actor A as Automation
-    participant HA as HA Core
+    participant HA as homeassistant runtime
     participant I as custom_components.pidp11
     participant RC as SimH remote console :2223
     participant E as SimH pdp11
@@ -143,7 +143,7 @@ sequenceDiagram
     participant E as SimH pdp11
     participant RC as remote console
     participant I as integration
-    participant HA as HA Core
+    participant HA as homeassistant runtime
 
     U->>G: flip SW_START
     G->>D: input sample

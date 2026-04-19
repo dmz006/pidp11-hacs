@@ -1,8 +1,8 @@
 # AGENT.md — pidp11-hacs
 
-Operational rulebook for any AI agent (or human) working on this repository.
-Patterned on https://github.com/dmz006/datawatch/blob/main/AGENT.md and adapted
-for a dual-artifact project (Home Assistant add-on + HACS integration).
+Operational rulebook for any AI agent (or human) working on this
+repository. Tailored for a dual-artifact project: a Home Assistant
+Supervisor add-on plus a HACS integration, co-located in one repo.
 
 ---
 
@@ -130,12 +130,13 @@ Bump rules:
   entry is trivial.
 - Never re-tag a shipped version.
 
-## 13. Rate Limit & Interruption Handling
+## 13. Interruption Handling
 
-If an agent is rate-limited mid-task, it must emit
-`DATAWATCH_RATE_LIMITED: resets at <time>` and leave the working tree in
-a committable state (either fully clean or with a WIP commit on a
-`wip/<topic>` branch). Never leave uncommitted partial edits on `main`.
+If an agent is rate-limited or otherwise interrupted mid-task, it must
+leave the working tree in a committable state — either fully clean, or
+with a WIP commit on a `wip/<topic>` branch naming the next step in the
+commit body. Never leave uncommitted partial edits on `main`. On
+resume, the next agent reads the latest commit message to pick up.
 
 ## 14. Security Rules
 

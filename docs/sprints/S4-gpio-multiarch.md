@@ -24,14 +24,10 @@ is available for testing.
 4. **Boot-select encoder.** Wire the encoder read path to update
    `sensor.pidp11_boot_select` and trigger the boot-selector service
    per R10 decision.
-5. **Multi-arch CI.** Build `linux/arm64` image, push to
-   `ghcr.io/<owner>/pidp11-addon-aarch64:X.Y.Z` on tag.
-   `linux/amd64` ships too but is emulator-only (no GPIO) and uses a
-   different image name.
-6. **Docs for HA Container users.** `docs/install-container.md` with
-   a `docker-compose.example.yml` that sets the same devices +
-   privileges.
-7. **Hardware checklist updated.** Every v1 feature has a checklist
+5. **CI image build.** Build `linux/arm64` image, push to
+   `ghcr.io/<owner>/pidp11-addon-aarch64:X.Y.Z` on tag. Pi 5 is
+   aarch64-only; no amd64 or armv7 targets.
+6. **Hardware checklist updated.** Every v1 feature has a checklist
    entry in `tests/hardware/MANUAL-CHECKLIST.md`. Signed run attached
    to the v1.0.0 release.
 

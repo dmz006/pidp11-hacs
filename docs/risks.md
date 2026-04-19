@@ -86,16 +86,12 @@ entry "lamp animation matches bare-metal reference video".
 
 **Owner.** TBD. **Status.** Observe in S4.
 
-## R7 — HA Container install path (non-HAOS)
+## R7 — HA Container install path (non-HAOS) — RETIRED
 
-**Risk.** Users on HA Container cannot install Supervisor add-ons.
-The README claims we support them via `docker run`; we need to
-actually write that doc and test it.
-
-**Mitigation.** `docs/install-container.md` in S4, plus a
-`docker-compose.example.yml`. Explicitly supported targets documented.
-
-**Owner.** TBD. **Status.** Plan for S4.
+**Status.** Closed 2026-04-18 as "won't support". HA Container and
+HA Core are not supported targets (see `docs/architecture.md §7`).
+Users on those installs must move to HAOS or HA Supervised. No
+`docker run` documentation or `docker-compose` example ships.
 
 ## R8 — HACS review / acceptance
 
