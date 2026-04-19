@@ -1,0 +1,6 @@
+# Home Assistant Supervisor add-on repository manifest.
+# Installed in HA via Settings -> Add-ons -> Add-on Store -> "..." -> Repositories
+# by pasting the GitHub URL of this repo.
+name: PiDP-11
+url: "https://github.com/dmz006/pidp11-hacs"
+maintainer: "David Zendzian <davidzendzian@gmail.com>"

@@ -1,0 +1,23 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to PiDP-11 add-on",
+        "description": "Point this integration at the PiDP-11 emulator add-on's remote-console port.",
+        "data": {
+          "host": "Host",
+          "remote_console_port": "Remote console port",
+          "shared_secret": "Shared secret"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to the remote console.",
+      "invalid_auth": "Shared secret rejected by the add-on.",
+      "unknown": "Unexpected error."
+    },
+    "abort": {
+      "already_configured": "This host is already configured."
+    }
+  }
+}

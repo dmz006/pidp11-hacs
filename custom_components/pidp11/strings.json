@@ -1,0 +1,41 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to PiDP-11 add-on",
+        "description": "Point this integration at the PiDP-11 emulator add-on's remote-console port.",
+        "data": {
+          "host": "Host",
+          "remote_console_port": "Remote console port",
+          "shared_secret": "Shared secret"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to the remote console.",
+      "invalid_auth": "Shared secret rejected by the add-on.",
+      "unknown": "Unexpected error."
+    },
+    "abort": {
+      "already_configured": "This host is already configured."
+    }
+  },
+  "services": {
+    "boot": {
+      "name": "Boot",
+      "description": "Boot the PDP-11 from a named target."
+    },
+    "halt": {
+      "name": "Halt",
+      "description": "Halt the running PDP-11 CPU."
+    },
+    "deposit": {
+      "name": "Deposit",
+      "description": "Write a word into memory at the given octal address."
+    },
+    "examine": {
+      "name": "Examine",
+      "description": "Read a word from memory at the given octal address."
+    }
+  }
+}

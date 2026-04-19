@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# HA runtime
+.storage/
+home-assistant.log*
+
+# Build artifacts
+dist/
+build/
+*.tar.gz
+
+# Local overrides
+.env
+.env.local
+tests/hardware/*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Keep Claude-local memory store out of the repo
+.claude/

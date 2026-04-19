@@ -1,0 +1,56 @@
+[project]
+name = "pidp11-hacs"
+version = "0.0.0"
+description = "Home Assistant add-on + HACS integration for the PiDP-11 PDP-11 emulator."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
+authors = [{ name = "David Zendzian", email = "davidzendzian@gmail.com" }]
+dependencies = [
+    "asyncssh>=2.14",
+    "voluptuous>=0.14",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+    "pytest-homeassistant-custom-component>=0.13.0",
+    "testcontainers>=4.0",
+]
+lint = [
+    "ruff>=0.5",
+    "mypy>=1.10",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "-ra",
+]
+markers = [
+    "hardware: requires physical PiDP-11 hat — skipped in CI",
+    "addon: exercises the add-on container — needs Docker",
+]
+
+[tool.coverage.run]
+source = ["custom_components/pidp11"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 95
+show_missing = true
+skip_empty = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+files = ["custom_components/pidp11"]

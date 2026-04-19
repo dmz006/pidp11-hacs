@@ -1,0 +1,10 @@
+{
+  "name": "PiDP-11",
+  "content_in_root": false,
+  "render_readme": true,
+  "homeassistant": "2024.12.0",
+  "zip_release": false,
+  "filename": "pidp11.zip",
+  "country": ["US"],
+  "hide_default_branch": false
+}

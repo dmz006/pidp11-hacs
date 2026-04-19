@@ -1,0 +1,10 @@
+---
+build_from:
+  aarch64: ghcr.io/home-assistant/aarch64-base-debian:bookworm
+args:
+  # Pinned upstream commit. S1 will set this to the real SHA.
+  PIDP11_COMMIT: "REPLACE_IN_S1"
+labels:
+  org.opencontainers.image.title: "PiDP-11 Emulator"
+  org.opencontainers.image.source: "https://github.com/dmz006/pidp11-hacs"
+  org.opencontainers.image.licenses: "MIT"

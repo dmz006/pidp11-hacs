@@ -1,0 +1,40 @@
+boot:
+  name: Boot
+  description: Boot the PDP-11 from a named target.
+  fields:
+    target:
+      name: Boot target
+      description: "OS to boot (e.g. 211bsd, rt11, unixv6)."
+      required: true
+      example: "211bsd"
+      selector:
+        text:
+
+halt:
+  name: Halt
+  description: Halt the running PDP-11 CPU.
+
+deposit:
+  name: Deposit
+  description: Write a word into PDP-11 memory at the given octal address.
+  fields:
+    address:
+      name: Address (octal)
+      required: true
+      selector:
+        text:
+    value:
+      name: Value (octal)
+      required: true
+      selector:
+        text:
+
+examine:
+  name: Examine
+  description: Read a word from PDP-11 memory at the given octal address.
+  fields:
+    address:
+      name: Address (octal)
+      required: true
+      selector:
+        text:

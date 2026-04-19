@@ -1,0 +1,47 @@
+---
+# Supervisor add-on manifest. All values are S0-skeleton placeholders.
+slug: pidp11
+name: PiDP-11 Emulator
+version: "0.0.1"
+description: >
+  SimH PDP-11 emulator from obsolescence/pidp11, with PiDP-11 front-panel
+  GPIO driver and a persistent SSH console.
+url: https://github.com/dmz006/pidp11-hacs
+arch:
+  - aarch64
+startup: application
+boot: auto
+init: false
+host_network: false
+ports:
+  "22/tcp": 2211
+  "2223/tcp": 2223
+ports_description:
+  "22/tcp": SSH to PDP-11 console (screen)
+  "2223/tcp": SimH remote console (for HA integration)
+map:
+  - share:rw
+  - addon_config:rw
+devices:
+  - /dev/mem
+privileged:
+  - SYS_RAWIO
+gpio: true
+devicetree: true
+hassio_api: true
+hassio_role: default
+image: ghcr.io/dmz006/pidp11-addon-{arch}
+options:
+  ssh_password: ""
+  ssh_password_disabled: false
+  ssh_authorized_keys: ""
+  default_boot: "211bsd"
+  enable_gpio: true
+  remote_console_port: 2223
+schema:
+  ssh_password: password
+  ssh_password_disabled: bool
+  ssh_authorized_keys: str?
+  default_boot: "list(211bsd|rt11|unixv6|unixv7|rsx11m)"
+  enable_gpio: bool
+  remote_console_port: port
