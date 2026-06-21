@@ -53,13 +53,15 @@ SSH_PASSWORD_DISABLED="${SSH_PASSWORD_DISABLED:-false}"
 log "Default boot: ${DEFAULT_BOOT} | GPIO: ${ENABLE_GPIO}"
 
 # ── Initial setup ─────────────────────────────────────────────────────────────
-mkdir -p "${SHM_DIR}" "${DISKS_DIR}" /data/ssh
+mkdir -p "${SHM_DIR}" "${DISKS_DIR}" /data/ssh /share/pidp11
 
 if [[ ! -f "${SECRET_FILE}" ]]; then
     python3 -c "import secrets; print(secrets.token_hex(32))" > "${SECRET_FILE}"
     chmod 600 "${SECRET_FILE}"
     log "Generated remote console secret"
 fi
+# Share secret with the HA integration via /share (readable by HA core)
+cp "${SECRET_FILE}" /share/pidp11/remote_console.secret 2>/dev/null || true
 
 # SDL stubs — binary links against SDL2 but we never open a display
 export SDL_VIDEODRIVER=offscreen
@@ -207,6 +209,7 @@ while true; do
 
     log "Booting: ${SEL}"
     printf 'cd %s\ndo boot.ini\n' "${SYSTEMS_DIR}/${SEL}" > "${SHM_DIR}/tmpsimhcommand.txt"
+    echo "${SEL}" > /share/pidp11/current_system
 
     # ── GPIO S4: start rpcbind + Blinkenlight server ──────────────────────────
     if [[ "${ENABLE_GPIO}" == "true" ]]; then

@@ -3,11 +3,16 @@
     "step": {
       "user": {
         "title": "Connect to PiDP-11 add-on",
-        "description": "Point this integration at the PiDP-11 emulator add-on's remote-console port.",
+        "description": "Point this integration at the PiDP-11 emulator add-on's remote-console port.\n\n{secret_hint}",
         "data": {
           "host": "Host",
           "remote_console_port": "Remote console port",
           "shared_secret": "Shared secret"
+        },
+        "data_description": {
+          "host": "IP or hostname of the machine running the PiDP-11 add-on",
+          "remote_console_port": "Port mapped to the add-on's authshim (default 2223)",
+          "shared_secret": "Token from /share/pidp11/remote_console.secret or the add-on log"
         }
       }
     },
@@ -20,22 +25,46 @@
       "already_configured": "This host is already configured."
     }
   },
+  "entity": {
+    "sensor": {
+      "cpu_state": {
+        "name": "CPU state",
+        "state": {
+          "running": "Running",
+          "halted": "Halted",
+          "offline": "Offline"
+        }
+      },
+      "system": {
+        "name": "System"
+      }
+    },
+    "switch": {
+      "cpu_running": {
+        "name": "CPU running"
+      }
+    }
+  },
   "services": {
     "boot": {
       "name": "Boot",
-      "description": "Boot the PDP-11 from a named target."
+      "description": "Boot the PDP-11 from a named OS target."
     },
     "halt": {
       "name": "Halt",
       "description": "Halt the running PDP-11 CPU."
     },
+    "continue_cpu": {
+      "name": "Continue",
+      "description": "Resume the halted PDP-11 CPU."
+    },
     "deposit": {
       "name": "Deposit",
-      "description": "Write a word into memory at the given octal address."
+      "description": "Write a word into PDP-11 memory at the given octal address."
     },
     "examine": {
       "name": "Examine",
-      "description": "Read a word from memory at the given octal address."
+      "description": "Read a word from PDP-11 memory at the given octal address."
     }
   }
 }

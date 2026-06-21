@@ -7,7 +7,6 @@ requires-python = ">=3.12"
 license = { file = "LICENSE" }
 authors = [{ name = "David Zendzian", email = "davidzendzian@gmail.com" }]
 dependencies = [
-    "asyncssh>=2.14",
     "voluptuous>=0.14",
 ]
 

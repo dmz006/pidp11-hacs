@@ -1,18 +1,38 @@
 boot:
   name: Boot
-  description: Boot the PDP-11 from a named target.
+  description: Boot the PDP-11 from a named OS target.
   fields:
     target:
       name: Boot target
-      description: "OS to boot (e.g. 211bsd, rt11, unixv6)."
+      description: "OS name (e.g. 211bsd, rt11, unix6). Instructs SimH to run that system's boot.ini."
       required: true
       example: "211bsd"
       selector:
-        text:
+        select:
+          options:
+            - "211bsd"
+            - "idled"
+            - "blinky"
+            - "dos11"
+            - "rt11"
+            - "rsts7"
+            - "unix1"
+            - "unix5"
+            - "unix6"
+            - "unix7"
+            - "sysiii"
+            - "sysv"
+            - "rsx11mp"
+            - "rsx11bq"
+          custom_value: true
 
 halt:
   name: Halt
-  description: Halt the running PDP-11 CPU.
+  description: Halt the running PDP-11 CPU (SimH stays running, CPU pauses at sim> prompt).
+
+continue_cpu:
+  name: Continue
+  description: Resume the halted PDP-11 CPU.
 
 deposit:
   name: Deposit
@@ -20,21 +40,27 @@ deposit:
   fields:
     address:
       name: Address (octal)
+      description: "PDP-11 memory address in octal, e.g. 001000"
       required: true
+      example: "001000"
       selector:
         text:
     value:
       name: Value (octal)
+      description: "16-bit word value in octal, e.g. 000240"
       required: true
+      example: "000240"
       selector:
         text:
 
 examine:
   name: Examine
-  description: Read a word from PDP-11 memory at the given octal address.
+  description: Read a word from PDP-11 memory at the given octal address. Returns the value.
   fields:
     address:
       name: Address (octal)
+      description: "PDP-11 memory address or register name, e.g. 001000 or PC"
       required: true
+      example: "PC"
       selector:
         text:
