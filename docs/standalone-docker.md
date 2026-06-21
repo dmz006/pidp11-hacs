@@ -308,90 +308,44 @@ docker restart pidp11
 
 ## 8 — Boot a different OS with the front-panel switches
 
-### Full switch-to-OS table
+For the complete OS switch table, front panel control sequences (halt, single-step,
+memory examine/deposit, start), and safe shutdown procedures, see the dedicated guide:
 
-Set the SR switches to the octal number shown, then boot (see sequences below).
-Switch `0` = all switches down in that group.
+**[docs/front-panel.md](./front-panel.md)**
 
-| SR octal | System | Disk needed | Notes |
-|----------|--------|-------------|-------|
-| `0000` | `idled` (lamp demo) | — | Default when all switches down. Shows OS menu on address LEDs while cycling. |
-| `0001` | `rsx11mp` — RSX-11M+ | `rsx11mp/PiDP11_DU0.dsk` | Oscar's distribution; classic real-time OS |
-| `0002` | `rsts7` — RSTS/E v7.0 | Bundled | DEC time-sharing BASIC system |
-| `0003` | `rt11` — RT-11 | Bundled | Single-user real-time OS |
-| `0004` | `dos11` — DOS-11 | Bundled | Earliest DEC disk OS |
-| `0101` | `unix1` — Unix V1 | Bundled | Ken Thompson's reconstructed 1971 Unix |
-| `0102` | `211bsd` — 2.11BSD | Auto-downloaded | Last BSD for PDP-11; active maintenance by Chase Covello |
-| `0105` | `unix5` — Unix V5 | Bundled | 1974 Research Unix |
-| `0106` | `unix6` — Unix V6 | Bundled | 1975 Research Unix (the Lions book edition) |
-| `0107` | `unix7` — Unix V7 | `unix7/disk0.hp` | 1979 Research Unix; last Bell Labs V7 |
-| `0113` | `sysiii` — Unix System III | `sysiii/disk.hp` | 1982 AT&T commercial Unix |
-| `0115` | `sysv` — Unix System V | `sysv/disk.hp` | 1983 AT&T System V |
-| `1001` | `idled` (alternate) | — | Same lamp demo via a different switch pattern |
-| `1002` | `blinky` — pure LED demo | — | No OS; maximum blinkenlight effect |
+Quick reference:
 
-Disk images marked "Bundled" are inside the Docker image — no staging needed.
-Images marked with a filename need to be staged in `/opt/pidp11-share/pidp11/disks/<system>/`
-(see section 7).
+| SR (octal) | System | Disk required |
+|-----------|--------|---------------|
+| `0000` | `idled` — lamp demo (default, all switches down) | — |
+| `0001` | `rsx11mplus` — RSX-11M+ | `rsx11mp/PiDP11_DU0.dsk` |
+| `0002` | `rsts7` — RSTS/E v7.0 | Bundled |
+| `0003` | `rt11` — RT-11 | Bundled |
+| `0004` | `dos11` — DOS-11 | Bundled |
+| `0005` | `ias` — IAS | Bundled |
+| `0102` | `211bsd` — 2.11BSD | Auto-downloaded |
+| `0105` | `unix5` — Unix V5 | Bundled |
+| `0106` | `unix6` — Unix V6 | Bundled |
+| `0107` | `unix7` — Unix V7 | `unix7/disk0.hp` |
+| `0113` | `sysiii` — Unix System III | `sysiii/disk.hp` |
+| `0115` | `sysv` — Unix System V | `sysv/disk.hp` |
+| `1000` | `nankervis` — Nankervis multi-OS system | Special |
+| `1001` | `idled` — lamp demo (alternate) | — |
+| `1002` | `blinky` — pure LED demo | — |
+
+**To boot:** set SR switches → press the **ADDR rotary encoder button**.
+
+**To shut down:** run the OS shutdown command first (RSX: `RUN $SHUTUP`;
+2.11BSD/Unix V7: `sync` three times; RT-11: no shutdown needed), then push
+HALT and press the ADDR knob. Wait 15 seconds before cutting power.
 
 ### How to read the switch setting from the idled display
 
-When `idled` is running, the address register LEDs cycle through every available
-OS in sequence. Each entry stays on for ~2 s and the address LEDs show the SR
-switch value in binary (MSB left). Count the lit LEDs or read the octal value
-shown on the Lovelace card to find the setting for the OS you want.
+When `idled` is running, the address LEDs cycle through every available OS (~2 s each),
+showing the SR switch value in binary. Count the lit LEDs to find the octal setting
+for the OS you want, then set the switches and press the ADDR knob to boot it.
 
-### Physical front-panel sequences
-
-#### Reboot into a different OS
-1. Set the SR switches to the octal value for your desired OS (use the table above).
-2. Press the **ADDR rotary encoder center button** (the knob on the left side of
-   the address display — this is the `LOAD ADDRESS` switch on the real PDP-11/70).
-3. The running OS halts and SimH exits; the container reads the SR switches and
-   boots the newly selected OS.
-
-#### Halt and continue
-1. Flip the **ENABLE/HALT** toggle to the **HALT** position — the CPU stops at the next
-   instruction and the RUN lamp goes dark.
-2. Flip back to **ENABLE**, then toggle **CONT** (the CONT/ENABLE momentary switch) — the
-   CPU resumes from where it stopped and the RUN lamp lights up again.
-
-#### Single-step execution
-1. Flip **ENABLE/HALT** to **HALT** to stop the CPU.
-2. Toggle **CONT** once per step — each toggle executes one instruction.
-3. Watch the ADDRESS and DATA lamps change with every step.
-4. Flip back to **ENABLE** and toggle **CONT** to return to full-speed execution.
-
-#### Examine a memory address or register
-1. Flip **ENABLE/HALT** to **HALT** (CPU must be halted).
-2. Set the SR switches to the address you want to inspect (in octal).
-3. Toggle **EXAM** — the value at that address appears on the DATA LEDs.
-4. Toggle **EXAM** again to step to the next address automatically.
-
-#### Deposit (write) to a memory address
-1. Halt the CPU (ENABLE/HALT → HALT).
-2. Set the SR switches to the **address** you want to write.
-3. Toggle **LOAD ADRS** — the ADDRESS LEDs mirror your SR switches, confirming the address.
-4. Set the SR switches to the **data value** you want to write.
-5. Toggle **DEP** — the value is written and the address auto-increments.
-
-#### Start a program from a known address
-1. Set the SR switches to the **starting address** of the program.
-2. Toggle **LOAD ADRS** — the ADDRESS LEDs confirm the address.
-3. Toggle **START** — the CPU begins executing from that address.
-
-#### Shut down an OS cleanly, then pick another
-1. Shut down from within the running OS:
-   - **RSX-11M+**: `SHUTDOWN` at the MCR prompt
-   - **2.11BSD / Unix V7**: `halt` or `shutdown -h now` as root
-   - **RT-11**: `BYE`
-   - **RSTS/E**: `SHUTUP` at the KMON prompt
-   - **Unix V5 / V6**: `haltsys` (or sync three times and power cycle)
-2. Once the OS has shut down, flip **ENABLE/HALT** to **HALT**.
-3. Set the SR switches to your new OS, then press the **ADDR rotary encoder button** to reboot.
-
-> **Note:** These sequences apply to the physical PiDP-11 hat. If you're
-> running headless (no hat), use `DEFAULT_BOOT` or the SSH console instead.
+### Booting without physical switches
 
 ### Booting without physical switches
 

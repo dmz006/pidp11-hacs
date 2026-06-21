@@ -101,8 +101,8 @@ docker run -d --name pidp11 --restart unless-stopped \
 Full instructions, prerequisites, disk image staging, and OS boot table:
 **[docs/standalone-docker.md](./docs/standalone-docker.md)**
 
-To boot a different OS or operate the front panel switches:
-**[§8 — Boot a different OS / front panel sequences](./docs/standalone-docker.md#8--boot-a-different-os-with-the-front-panel-switches)**
+Front panel controls, OS switch table, and shutdown procedures:
+**[docs/front-panel.md](./docs/front-panel.md)**
 
 ---
 
