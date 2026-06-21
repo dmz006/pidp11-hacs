@@ -6,11 +6,10 @@ from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CPU_STATE_RUNNING, DOMAIN
+from .const import CPU_STATE_RUNNING
 from .coordinator import PiDP11Coordinator
 from .sensor import _device_info
 

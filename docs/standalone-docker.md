@@ -308,31 +308,80 @@ docker restart pidp11
 
 ## 8 — Boot a different OS with the front-panel switches
 
-Flip the SR switches before the container starts its boot loop. The
-boot-select encoder maps switch patterns (octal) to system names:
+### Full switch-to-OS table
 
-| SR octal | System |
-|----------|--------|
-| `0000` | default (set by `DEFAULT_BOOT` env var, default: `idled`) |
-| `0001` | RSX-11M+ (`rsx11mp`) |
-| `0002` | RSTS/E v7 (`rsts7`) |
-| `0101` | Unix V1 (`unix1`) |
-| `0102` | 2.11BSD (`211bsd`, auto-download) |
+Set the SR switches to the octal number shown, then boot (see sequences below).
+Switch `0` = all switches down in that group.
 
-See `pidp11-addon/systems/selections` in the repo for the full mapping.
+| SR octal | System | Disk needed | Notes |
+|----------|--------|-------------|-------|
+| `0000` | `idled` (lamp demo) | — | Default when all switches down. Shows OS menu on address LEDs while cycling. |
+| `0001` | `rsx11mp` — RSX-11M+ | `rsx11mp/PiDP11_DU0.dsk` | Oscar's distribution; classic real-time OS |
+| `0002` | `rsts7` — RSTS/E v7.0 | Bundled | DEC time-sharing BASIC system |
+| `0003` | `rt11` — RT-11 | Bundled | Single-user real-time OS |
+| `0004` | `dos11` — DOS-11 | Bundled | Earliest DEC disk OS |
+| `0101` | `unix1` — Unix V1 | Bundled | Ken Thompson's reconstructed 1971 Unix |
+| `0102` | `211bsd` — 2.11BSD | Auto-downloaded | Last BSD for PDP-11; active maintenance by Chase Covello |
+| `0105` | `unix5` — Unix V5 | Bundled | 1974 Research Unix |
+| `0106` | `unix6` — Unix V6 | Bundled | 1975 Research Unix (the Lions book edition) |
+| `0107` | `unix7` — Unix V7 | `unix7/disk0.hp` | 1979 Research Unix; last Bell Labs V7 |
+| `0113` | `sysiii` — Unix System III | `sysiii/disk.hp` | 1982 AT&T commercial Unix |
+| `0115` | `sysv` — Unix System V | `sysv/disk.hp` | 1983 AT&T System V |
+| `1001` | `idled` (alternate) | — | Same lamp demo via a different switch pattern |
+| `1002` | `blinky` — pure LED demo | — | No OS; maximum blinkenlight effect |
 
-To boot a specific system without touching switches, set `DEFAULT_BOOT`:
+Disk images marked "Bundled" are inside the Docker image — no staging needed.
+Images marked with a filename need to be staged in `/opt/pidp11-share/pidp11/disks/<system>/`
+(see section 7).
+
+### How to read the switch setting from the idled display
+
+When `idled` is running, the address register LEDs cycle through every available
+OS in sequence. Each entry stays on for ~2 s and the address LEDs show the SR
+switch value in binary (MSB left). Count the lit LEDs or read the octal value
+shown on the Lovelace card to find the setting for the OS you want.
+
+### Physical front-panel boot sequence
+
+**To reboot into a different OS:**
+1. Set the SR switches to the octal value for your desired OS (use the table above).
+2. Press the **ADDR rotary encoder center button** (the knob on the left side of
+   the address display — this is the `LOAD ADDRESS` switch on the real PDP-11/70).
+3. The running OS halts and SimH exits; the container reads the SR switches and
+   boots the newly selected OS.
+
+**To halt the running CPU without rebooting:**
+1. Flip the `ENABLE/HALT` toggle to the **HALT** position.
+2. The CPU halts at the next instruction; the RUN lamp goes dark.
+3. Flip back to `ENABLE` to resume, or press the ADDR knob to reboot.
+
+**To shut down cleanly from inside an OS:**
+- **RSX-11M+**: at the MCR prompt, type `SHUTDOWN`
+- **2.11BSD / Unix V7**: as root, type `halt` or `shutdown -h now`
+- **RT-11**: type `BYE`
+- **RSTS/E**: type `SHUTUP` at the KMON prompt
+Then flip `ENABLE/HALT` to HALT and press the ADDR knob to pick a new OS.
+
+> **Note:** These sequences apply to the physical PiDP-11 hat. If you're
+> running headless (no hat), use `DEFAULT_BOOT` or the SSH console instead.
+
+### Booting without physical switches
+
+To boot a specific OS without touching hardware, set `DEFAULT_BOOT` in the
+docker run command:
 
 ```bash
 docker run -d ... -e DEFAULT_BOOT=211bsd ...
 ```
 
-Or update a running container:
+Or from the SSH console, halt SimH and let the container loop re-read switches:
 
 ```bash
-docker stop pidp11
-docker rm pidp11
-# re-run with -e DEFAULT_BOOT=211bsd
+ssh pdp11@<pi-ip> -p 2211
+# Inside SimH:
+HALT
+# Exit SimH (container reads switches and reboots):
+EXIT
 ```
 
 ---
