@@ -28,10 +28,11 @@ is available for testing.
    `PDP-11xx.ini` separately, redirects `boot.ini` → patched copy). Boot.ini
    source files remain unchanged so container-only operation still works.
 4b. ⏳ **Boot-select encoder.** SR switch reading is wired (`scansw` → `getsel.sh`).
-   `scansw` was compiled as 32-bit ARM (armhf) due to the builder's default `CC`;
-   fixed in Dockerfile with `make CC=gcc` — scansw.c already supports Pi 5 via
-   `pinctrl/gpiochip_rp1.c` (no source changes needed). Needs image rebuild to verify.
-   `sensor.pidp11_boot_select` HA entity deferred to post-rebuild test.
+   `scansw` fixed for Pi 5 (64-bit aarch64 via `rm -f scansw && make CC=gcc`).
+   After rebuild, lamps were dark on first start — root cause: stale rpcbind program-99
+   registration from prior container left blinkenlightd unreachable; fixed in run.sh
+   with `pkill -x pidp1170_blinkenlightd` before `rpcinfo -d 99 1` + sleep 1.
+   `sensor.pidp11_boot_select` HA entity test pending.
 5. ⏳ **CI image build.** Build `linux/arm64` image, push to
    `ghcr.io/<owner>/pidp11-addon-aarch64:X.Y.Z` on tag. Deferred to v1.0.0 release.
 6. ⏳ **Hardware checklist.** Every v1 feature has a checklist entry in

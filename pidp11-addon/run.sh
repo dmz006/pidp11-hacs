@@ -265,10 +265,14 @@ while true; do
             rpcbind -w 2>/dev/null || true
             sleep 1
         fi
-        # Clear stale program-99 registration from a previous run so SimH finds
-        # the new blinkenlightd port rather than the old (now-refused) one.
+        # Kill any leftover blinkenlightd from a prior container/restart first,
+        # then clear its stale program-99 registration from the portmapper.
+        # Without the kill, rpcbind may retain the old port entry even after the
+        # prior process exited, causing SimH to connect to a dead port (lamps dark).
+        pkill -x pidp1170_blinkenlightd 2>/dev/null || true
+        sleep 0.5
         rpcinfo -d 99 1 2>/dev/null || true
-        sleep 0.3
+        sleep 1
         log "Starting Blinkenlight server (server11)"
         "${SERVER11}" &
         # Wait for blinkenlightd to register with portmapper before starting SimH.
