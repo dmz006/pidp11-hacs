@@ -15,11 +15,12 @@ GPIO lamp driver running inside an HAOS Supervisor add-on container.
 
 ## Dashboard Card
 
-Add the **PiDP-11 Front Panel** card to any Lovelace dashboard for a live view of the
-running emulator — amber address and data LEDs, the run/halt lamp, and the currently
-booted OS.
+Add the **PiDP-11 Front Panel** card to any Lovelace dashboard for a faithful
+software replica of the physical PDP-11/70 front panel — real-time ADDRESS and DATA
+LED rows, status indicators, SR toggle switches, rotary selector indicators, and
+control buttons, all in the original dark panel color scheme.
 
-![PiDP-11 Lovelace card showing amber LED rows and 2.11BSD system](./docs/images/lovelace-card.svg)
+![PiDP-11 Lovelace card showing faithful PDP-11/70 front panel replica](./docs/images/lovelace-card.svg)
 
 The card auto-registers when you install the integration — no manual Lovelace resource
 step needed. Just add it:
@@ -32,21 +33,21 @@ Or click **Add Card → PiDP-11 Front Panel** in the Lovelace card picker.
 
 ### What the lights mean
 
-| Row | Source | What it shows |
-|-----|--------|---------------|
-| **ADDRESS** (top) | `EXAMINE PC` | Program counter, displayed as 16 binary LEDs (MSB left). Groups of 4 = one hex nibble. |
-| **DATA** (bottom) | `EXAMINE PSW` | Processor status word — interrupt level in bits 7–5, condition codes in bits 3–0. |
-| **RUN lamp** | CPU state | Amber = CPU running; dark = halted; very dark = add-on offline. |
-| **PROC dot** | CPU state | Mirrors the RUN lamp — on when the CPU is executing instructions. |
+| Panel element | Source | What it shows |
+|---------------|--------|---------------|
+| **STATUS row** (12 LEDs) | CPU state / PSW | PAR ERR, ADRS ERR, RUN (on = running), PAUSE, MASTER; USER/SUPER/KERNEL (lit by CPU mode from PSW bits 15–14); ADDRESSING 16/18/22 (22 lit for PDP-11/70). |
+| **ADDRESS** (22 LEDs) | `EXAMINE PC` — 20 Hz live | Program counter as 22 binary LEDs in groups `[1,3,3,3,3,3,3,3]` (bits 21–0, MSB left). Updates at up to 20 Hz via the lamp push stream on port 2226. |
+| **DATA** (16 LEDs) | `EXAMINE PSW` — 20 Hz live | Processor status word as 16 binary LEDs in 4 groups of 4. Interrupt level in bits 7–5, condition codes in bits 3–0. Same 20 Hz stream as ADDRESS. |
+| **PARITY H/L** | *(no source)* | Always dark — SimH does not expose parity. |
+| **SR switches** (22) | `binary_sensor.pidp11_sr0`–`sr21` | Physical SR switch positions, updated via 250 ms push stream (port 2225). Toggle-knob style; knob at top = ON. |
+| **ADDR SELECT** | *(hardcoded)* | Shows PROG PHY active — always, because we EXAMINE PC. |
+| **DATA SELECT** | *(hardcoded)* | Shows DISPLAY REGISTER active — always, because we EXAMINE PSW. |
 
-The card polls via the integration's `DataUpdateCoordinator` (default interval: 5 s).
-It is **not** a live oscilloscope — real PDP-11 programs execute millions of instructions
-per second and the lamps would be a blur. Think of it as a heartbeat display: you see
-where the CPU is parked between polling ticks.
-
-Full real-time lamp animation (matching the physical hat's 60 Hz LED update rate) is
-the goal for v1.4 and requires reading lamp state from `pidp1170_blinkenlightd`.
-See [S5 sprint plan](./docs/sprints/S5-lamps-switches-dashboard.md) and [roadmap](./docs/roadmap.md).
+ADDRESS and DATA LEDs animate at **up to 20 Hz** via the dedicated lamp stream (port 2226,
+`_handle_lamp_stream` in the add-on). On each `pidp11_lamps` HA event the card calls
+`requestAnimationFrame` and patches only the LED class list — no full re-render.
+The 5 s coordinator tick still updates status indicators, CPU mode, system name, and SR
+switch positions.
 
 ### Optional entity overrides
 
@@ -55,10 +56,12 @@ of them if you've renamed your device:
 
 ```yaml
 type: custom:pidp11-panel-card
-state_entity:  sensor.pidp11_cpu_state
-pc_entity:     sensor.pidp11_pc
-psw_entity:    sensor.pidp11_psw
-system_entity: sensor.pidp11_system
+state_entity:    sensor.pidp11_cpu_state
+pc_entity:       sensor.pidp11_pc
+psw_entity:      sensor.pidp11_psw
+system_entity:   sensor.pidp11_system
+sr_prefix:       binary_sensor.pidp11_sr    # appended with 0..21
+cpu_mode_entity: sensor.pidp11_cpu_mode
 ```
 
 ---
@@ -212,6 +215,7 @@ is right there. Type `HALT`, then `EXAMINE PC`, then `CONTINUE` — watch the LE
 |-------|---------|------------|
 | `pidp11_sr_changed` | `{ sr_old, sr_new }` | SR register changes (from watch stream or 5 s poll) |
 | `pidp11_switch_changed` | `{ switch: "SR<N>", state: bool }` | Individual SR bit edge (from watch stream) |
+| `pidp11_lamps` | `{ ADDRESS: "xxxxxx", DATA: "xxxxxx" }` | PC and PSW snapshot (octal), fired up to 20 Hz by the lamp stream; consumed by the Lovelace card for live LED animation |
 
 Example automation — announce when the PDP-11 halts:
 ```yaml
@@ -271,29 +275,21 @@ serve the file at `/pidp11-hacs/pidp11-panel-card.js`, then calls
 `add_extra_js_url()` so HA loads it in every frontend session. The `customElements.define`
 call in the JS makes `type: custom:pidp11-panel-card` work in Lovelace.
 
-### What the card draws today (S5 phase 1)
+### What the card draws (v1.4)
 
-- **ADDRESS row** — PC value as 16 binary LEDs (4 groups of 4)
-- **DATA row** — PSW value as 16 binary LEDs
-- **RUN lamp** — amber when `sensor.pidp11_cpu_state == "running"`
-- **System name** — from `sensor.pidp11_system`
-- **Status indicators** — PROC / BUS / PAR ERR / ADRS ERR (BUS/PAR/ERR always off — no source yet)
+The card is a **faithful software replica of the physical PDP-11/70 front panel**:
 
-### S5 phase 2: real-time lamp animation
+- **Status row** — 12 indicator LEDs (PAR ERR, ADRS ERR, RUN, PAUSE, MASTER; USER/SUPER/KERNEL by CPU mode; ADDRESSING 16/18/22)
+- **ADDRESS row** — 22 orange-red LEDs in groups `[1,3,3,3,3,3,3,3]`, dark brick-red segment bar above
+- **DATA row** — 16 orange-red LEDs in 4 groups of 4, PARITY H/L dots (always off), dark purple segment bar above
+- **SR switches** — 22 toggle-style switches in alternating light/dark crimson groups, with bit numbers above (21→0)
+- **ADDR SELECT / DATA SELECT** — rotary indicator dot rows (8 + 4 positions) hardcoded to PROG PHY and DISPLAY REGISTER
+- **Footer** — booted OS name + LOAD ADRS / EXAM / DEP / CONT / ENABLE / S INST / START control buttons
 
-The physical PiDP-11 hat updates its lamps at ~60 Hz from `pidp1170_blinkenlightd`,
-which receives lamp register values from SimH via ONC RPC. To mirror that in the
-Lovelace card we need a push channel — either:
-
-- **Option A**: A Unix socket inside the container that the HA integration subscribes
-  to; blinkenlightd writes a compact JSON/binary frame each time it updates the lamps.
-- **Option B**: An HTTP/SSE endpoint in the add-on that streams lamp state.
-- **Option C**: Upstream PR to `obsolescence/pidp11` adding a push socket to the driver.
-
-Once the channel exists, the card will subscribe via `hass.connection.subscribeEvents()`
-or a WebSocket endpoint and repaint at up to 20 Hz (the Lovelace animation budget).
-Binary sensors for each physical switch (`binary_sensor.pidp11_sw_halt`, etc.) will
-also come from this channel. See [S5 sprint](./docs/sprints/S5-lamps-switches-dashboard.md).
+**Live animation** is driven by `pidp11_lamps` HA events (up to 20 Hz from port 2226).
+The fast path (`_updateLeds`) only patches `.adr` and `.dat` LED class lists via
+`querySelectorAll` + `requestAnimationFrame` — no full DOM rebuild. The 5 s coordinator
+tick handles everything else (status LEDs, CPU mode, system name, SR switches).
 
 ### Adding the card to HACS as a Lovelace plugin
 
@@ -335,11 +331,11 @@ Working end-to-end on Pi 5 + HAOS + PiDP-11 hat as of June 2026:
 - ✅ Binary sensors: CPU halted, SR0–SR21 (22 per-switch sensors)
 - ✅ HALT/CONTINUE services work; HALT→RUNNING transition in < 3 s
 - ✅ SSH console (port 2211)
-- ✅ Lovelace front panel card (S5 phase 1 — register snapshot, not live lamps)
+- ✅ Lovelace front panel card — faithful PDP-11/70 panel replica with all elements
 - ✅ SR watch stream: 250 ms push channel for switch change events (port 2225)
+- ✅ Lamp stream: 20 Hz PC/PSW push channel for live LED animation (port 2226)
 - ✅ mDNS auto-discovery: remote HAOS finds the Pi on the LAN automatically
 - ⏳ v1.0.0 release tag + GHCR image build
-- ⏳ S5 phase 2: real-time lamp animation (needs driver push channel)
 
 See `docs/sprints/` for the full sprint plan.
 

@@ -1,126 +1,314 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- PiDP-11 Lovelace card mockup
-     PC = 001234 octal (0b0000 0010 1001 1100)
-     PSW = 000340 octal (0b0000 0000 1110 0000)
-     System: 2.11BSD, CPU: RUNNING
+<!-- PiDP-11 Lovelace card — faithful PDP-11/70 front panel replica
+     Sample state: PC=001234, PSW=000340, system=211bsd, mode=kernel, RUNNING
+     Lit ADDRESS bits: 9,7,4,3,2  |  Lit DATA bits: 7,6,5 (interrupt level 7)
 -->
-<svg xmlns="http://www.w3.org/2000/svg" width="380" height="200" viewBox="0 0 380 200">
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="285" viewBox="0 0 420 285">
+  <defs>
+    <radialGradient id="lon" cx="33%" cy="33%" r="60%">
+      <stop offset="0%" stop-color="#ff7050"/>
+      <stop offset="100%" stop-color="#ff2e00"/>
+    </radialGradient>
+  </defs>
 
-  <!-- Card shadow/base -->
-  <rect width="380" height="200" rx="10" ry="10" fill="#111114"/>
+  <!-- Card body -->
+  <rect width="420" height="285" rx="8" fill="#1a0d0d"/>
+  <!-- Header tint -->
+  <rect width="420" height="42" rx="8" fill="#1f1010"/>
+  <rect y="10" width="420" height="32" fill="#1f1010"/>
+  <!-- Footer tint -->
+  <rect y="218" width="420" height="67" fill="#110808"/>
+  <rect y="218" width="420" height="8" fill="#1a0d0d"/>
+  <!-- Divider lines -->
+  <line x1="0" y1="42" x2="420" y2="42" stroke="#2d0f0f" stroke-width="1"/>
+  <line x1="0" y1="220" x2="420" y2="220" stroke="#2d0f0f" stroke-width="1"/>
 
-  <!-- Faceplate (top section with gradient approx as flat color) -->
-  <path d="M10,0 L370,0 Q380,0 380,10 L380,155 L0,155 L0,10 Q0,0 10,0 Z" fill="#1b1b1f"/>
+  <!-- LOGO -->
+  <text x="18" y="30" font-family="Helvetica Neue,Arial,sans-serif"
+        font-size="17" font-style="italic" font-weight="300" fill="#d8d0d0" letter-spacing="1">pdp<tspan font-weight="700" fill="#ffffff">11</tspan>/70</text>
+  <!-- System + state -->
+  <text x="402" y="20" font-family="Courier New,monospace" font-size="12"
+        fill="#ff5520" text-anchor="end" letter-spacing="1">211bsd</text>
+  <text x="402" y="35" font-family="Helvetica Neue,Arial,sans-serif" font-size="6.5"
+        fill="#dd4400" text-anchor="end" letter-spacing="2">RUNNING</text>
 
-  <!-- Bottom bar -->
-  <path d="M0,155 L380,155 L380,190 Q380,200 370,200 L10,200 Q0,200 0,190 Z" fill="#0e0e11"/>
+  <!-- ── STATUS INDICATOR ROW (cy=62) ── -->
+  <!-- Group 1: system state -->
+  <!-- PAR ERR off -->
+  <circle cx="22" cy="60" r="4" fill="#3d1010"/>
+  <text x="22" y="73" font-family="Helvetica Neue,Arial,sans-serif" font-size="4.5" fill="#c8b8b8" text-anchor="middle">PAR</text>
+  <text x="22" y="78.5" font-family="Helvetica Neue,Arial,sans-serif" font-size="4.5" fill="#c8b8b8" text-anchor="middle">ERR</text>
+  <!-- ADRS ERR off -->
+  <circle cx="38" cy="60" r="4" fill="#3d1010"/>
+  <text x="38" y="73" font-family="Helvetica Neue,Arial,sans-serif" font-size="4.5" fill="#c8b8b8" text-anchor="middle">ADRS</text>
+  <text x="38" y="78.5" font-family="Helvetica Neue,Arial,sans-serif" font-size="4.5" fill="#c8b8b8" text-anchor="middle">ERR</text>
+  <!-- RUN on -->
+  <circle cx="54" cy="60" r="4" fill="url(#lon)"/>
+  <circle cx="52" cy="58" r="1.5" fill="#ff9070" opacity="0.7"/>
+  <text x="54" y="76" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#c8b8b8" text-anchor="middle">RUN</text>
+  <!-- PAUSE off -->
+  <circle cx="70" cy="60" r="4" fill="#3d1010"/>
+  <text x="70" y="76" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#c8b8b8" text-anchor="middle">PAUSE</text>
+  <!-- MASTER off -->
+  <circle cx="88" cy="60" r="4" fill="#3d1010"/>
+  <text x="88" y="76" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#c8b8b8" text-anchor="middle">MASTER</text>
+  <!-- Group divider -->
+  <line x1="100" y1="52" x2="100" y2="70" stroke="#2d0f0f" stroke-width="1"/>
+  <!-- Group 2: CPU mode -->
+  <!-- USER off -->
+  <circle cx="112" cy="60" r="4" fill="#3d1010"/>
+  <text x="112" y="76" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#c8b8b8" text-anchor="middle">USER</text>
+  <!-- SUPER off -->
+  <circle cx="128" cy="60" r="4" fill="#3d1010"/>
+  <text x="128" y="76" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#c8b8b8" text-anchor="middle">SUPER</text>
+  <!-- KERNEL on -->
+  <circle cx="144" cy="60" r="4" fill="url(#lon)"/>
+  <circle cx="142" cy="58" r="1.5" fill="#ff9070" opacity="0.7"/>
+  <text x="144" y="76" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#c8b8b8" text-anchor="middle">KERNEL</text>
+  <!-- DATA off -->
+  <circle cx="162" cy="60" r="4" fill="#3d1010"/>
+  <text x="162" y="76" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#c8b8b8" text-anchor="middle">DATA</text>
+  <!-- Group divider -->
+  <line x1="174" y1="52" x2="174" y2="70" stroke="#2d0f0f" stroke-width="1"/>
+  <!-- Group 3: ADDRESSING -->
+  <text x="202" y="52" font-family="Helvetica Neue,Arial,sans-serif" font-size="4.5"
+        fill="#b0a0a0" text-anchor="middle" letter-spacing="0.5">ADDRESSING</text>
+  <!-- 16 off -->
+  <circle cx="186" cy="60" r="4" fill="#3d1010"/>
+  <text x="186" y="76" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#c8b8b8" text-anchor="middle">16</text>
+  <!-- 18 off -->
+  <circle cx="202" cy="60" r="4" fill="#3d1010"/>
+  <text x="202" y="76" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#c8b8b8" text-anchor="middle">18</text>
+  <!-- 22 on (PDP-11/70 always 22-bit) -->
+  <circle cx="218" cy="60" r="4" fill="url(#lon)"/>
+  <circle cx="216" cy="58" r="1.5" fill="#ff9070" opacity="0.7"/>
+  <text x="218" y="76" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#c8b8b8" text-anchor="middle">22</text>
 
-  <!-- Faceplate / bar divider line -->
-  <line x1="0" y1="155" x2="380" y2="155" stroke="#0a0a0d" stroke-width="1"/>
+  <!-- ── ADDRESS REGISTER ── -->
+  <!-- Segment bar (dark brick red) -->
+  <rect x="18" y="83" width="316" height="5" rx="1" fill="#7e1e1e"/>
+  <!-- Labels right of LEDs -->
+  <text x="402" y="96" font-family="Helvetica Neue,Arial,sans-serif" font-size="7"
+        fill="#d0c0c0" text-anchor="end" letter-spacing="2">ADDRESS</text>
+  <text x="402" y="107" font-family="Courier New,monospace" font-size="10"
+        fill="#ff5520" text-anchor="end" letter-spacing="1">001234</text>
+  <!-- 22 LEDs  groups [1,3,3,3,3,3,3,3]  cy=98  r=4.5
+       Lit: G4[2]=bit9  G5[1]=bit7  G6[1]=bit4  G6[2]=bit3  G7[0]=bit2 -->
+  <!-- G0 (bit21) off -->
+  <circle cx="22"  cy="98" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <!-- G1 (bits 20,19,18) off -->
+  <circle cx="39"  cy="98" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="51"  cy="98" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="63"  cy="98" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <!-- G2 (bits 17,16,15) off -->
+  <circle cx="80"  cy="98" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="92"  cy="98" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="104" cy="98" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <!-- G3 (bits 14,13,12) off -->
+  <circle cx="121" cy="98" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="133" cy="98" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="145" cy="98" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <!-- G4 (bits 11,10,9) — bit 9 ON -->
+  <circle cx="162" cy="98" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="174" cy="98" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="186" cy="98" r="4.5" fill="url(#lon)" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="184" cy="96" r="1.5" fill="#ff9070" opacity="0.6"/>
+  <!-- G5 (bits 8,7,6) — bit 7 ON -->
+  <circle cx="203" cy="98" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="215" cy="98" r="4.5" fill="url(#lon)" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="213" cy="96" r="1.5" fill="#ff9070" opacity="0.6"/>
+  <circle cx="227" cy="98" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <!-- G6 (bits 5,4,3) — bits 4,3 ON -->
+  <circle cx="244" cy="98" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="256" cy="98" r="4.5" fill="url(#lon)" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="254" cy="96" r="1.5" fill="#ff9070" opacity="0.6"/>
+  <circle cx="268" cy="98" r="4.5" fill="url(#lon)" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="266" cy="96" r="1.5" fill="#ff9070" opacity="0.6"/>
+  <!-- G7 (bits 2,1,0) — bit 2 ON -->
+  <circle cx="285" cy="98" r="4.5" fill="url(#lon)" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="283" cy="96" r="1.5" fill="#ff9070" opacity="0.6"/>
+  <circle cx="297" cy="98" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="309" cy="98" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
 
-  <!-- ── Brand ── -->
-  <text x="18" y="36" fill="#c0c0c8"
-        font-family="'Courier New', Courier, monospace"
-        font-size="15" font-weight="bold" letter-spacing="4">PDP-11/70</text>
-  <text x="18" y="50" fill="#3a3a44"
-        font-family="'Courier New', Courier, monospace"
-        font-size="8" letter-spacing="2">SIMH · PIDP-11 · HOME ASSISTANT</text>
+  <!-- ── DATA REGISTER ── -->
+  <!-- Segment bar (dark purple) -->
+  <rect x="18" y="111" width="246" height="5" rx="1" fill="#42185a"/>
+  <!-- Labels -->
+  <text x="402" y="124" font-family="Helvetica Neue,Arial,sans-serif" font-size="7"
+        fill="#d0c0c0" text-anchor="end" letter-spacing="2">DATA</text>
+  <text x="402" y="135" font-family="Courier New,monospace" font-size="10"
+        fill="#ff5520" text-anchor="end" letter-spacing="1">000340</text>
+  <!-- PARITY H/L dots (both off — not exposed by SimH) -->
+  <circle cx="22" cy="126" r="3.5" fill="#2a0a0a" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="33" cy="126" r="3.5" fill="#2a0a0a" stroke="#1a0606" stroke-width="1"/>
+  <text x="22" y="133.5" font-family="Helvetica Neue,Arial,sans-serif" font-size="4.5" fill="#b0a0a0" text-anchor="middle">H</text>
+  <text x="33" y="133.5" font-family="Helvetica Neue,Arial,sans-serif" font-size="4.5" fill="#b0a0a0" text-anchor="middle">L</text>
+  <text x="27" y="139" font-family="Helvetica Neue,Arial,sans-serif" font-size="4.5" fill="#b0a0a0" text-anchor="middle">PAR</text>
+  <!-- 16 DATA LEDs  groups [4,4,4,4]  cy=126  start x=52
+       PSW=000340: bits 7,6,5 ON (interrupt level 7) -->
+  <!-- G0 (bits 15-12) off -->
+  <circle cx="52"  cy="126" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="64"  cy="126" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="76"  cy="126" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="88"  cy="126" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <!-- G1 (bits 11-8) off -->
+  <circle cx="106" cy="126" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="118" cy="126" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="130" cy="126" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="142" cy="126" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <!-- G2 (bits 7,6,5,4) — bits 7,6,5 ON -->
+  <circle cx="160" cy="126" r="4.5" fill="url(#lon)" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="158" cy="124" r="1.5" fill="#ff9070" opacity="0.6"/>
+  <circle cx="172" cy="126" r="4.5" fill="url(#lon)" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="170" cy="124" r="1.5" fill="#ff9070" opacity="0.6"/>
+  <circle cx="184" cy="126" r="4.5" fill="url(#lon)" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="182" cy="124" r="1.5" fill="#ff9070" opacity="0.6"/>
+  <circle cx="196" cy="126" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <!-- G3 (bits 3-0) off -->
+  <circle cx="214" cy="126" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="226" cy="126" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="238" cy="126" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
+  <circle cx="250" cy="126" r="4.5" fill="#3d1010" stroke="#1a0606" stroke-width="1"/>
 
-  <!-- ── RUN lamp (lit amber) ── -->
-  <circle cx="354" cy="29" r="8" fill="#ff8c00"/>
-  <!-- highlight -->
-  <circle cx="351" cy="26" r="3" fill="#ffd080" opacity="0.7"/>
-  <text x="354" y="46" fill="#7a4a10"
-        font-family="'Courier New', Courier, monospace"
-        font-size="8" letter-spacing="2" text-anchor="middle">RUN</text>
+  <!-- ── SR SWITCHES ── -->
+  <!-- Bit number labels y=143 -->
+  <text x="22"  y="143" font-family="Courier New,monospace" font-size="5" fill="#c0b0b0" text-anchor="middle">21</text>
+  <text x="38"  y="143" font-family="Courier New,monospace" font-size="5" fill="#c0b0b0" text-anchor="middle">20</text>
+  <text x="49"  y="143" font-family="Courier New,monospace" font-size="5" fill="#c0b0b0" text-anchor="middle">19</text>
+  <text x="60"  y="143" font-family="Courier New,monospace" font-size="5" fill="#c0b0b0" text-anchor="middle">18</text>
+  <text x="76"  y="143" font-family="Courier New,monospace" font-size="5" fill="#c0b0b0" text-anchor="middle">17</text>
+  <text x="87"  y="143" font-family="Courier New,monospace" font-size="5" fill="#c0b0b0" text-anchor="middle">16</text>
+  <text x="98"  y="143" font-family="Courier New,monospace" font-size="5" fill="#c0b0b0" text-anchor="middle">15</text>
+  <text x="114" y="143" font-family="Courier New,monospace" font-size="5" fill="#c0b0b0" text-anchor="middle">14</text>
+  <text x="125" y="143" font-family="Courier New,monospace" font-size="5" fill="#c0b0b0" text-anchor="middle">13</text>
+  <text x="136" y="143" font-family="Courier New,monospace" font-size="5" fill="#c0b0b0" text-anchor="middle">12</text>
+  <text x="152" y="143" font-family="Courier New,monospace" font-size="5" fill="#c0b0b0" text-anchor="middle">11</text>
+  <text x="163" y="143" font-family="Courier New,monospace" font-size="5" fill="#c0b0b0" text-anchor="middle">10</text>
+  <text x="174" y="143" font-family="Courier New,monospace" font-size="5" fill="#c0b0b0" text-anchor="middle">9</text>
+  <text x="190" y="143" font-family="Courier New,monospace" font-size="5" fill="#c0b0b0" text-anchor="middle">8</text>
+  <text x="201" y="143" font-family="Courier New,monospace" font-size="5" fill="#c0b0b0" text-anchor="middle">7</text>
+  <text x="212" y="143" font-family="Courier New,monospace" font-size="5" fill="#c0b0b0" text-anchor="middle">6</text>
+  <text x="228" y="143" font-family="Courier New,monospace" font-size="5" fill="#c0b0b0" text-anchor="middle">5</text>
+  <text x="239" y="143" font-family="Courier New,monospace" font-size="5" fill="#c0b0b0" text-anchor="middle">4</text>
+  <text x="250" y="143" font-family="Courier New,monospace" font-size="5" fill="#c0b0b0" text-anchor="middle">3</text>
+  <text x="266" y="143" font-family="Courier New,monospace" font-size="5" fill="#c0b0b0" text-anchor="middle">2</text>
+  <text x="277" y="143" font-family="Courier New,monospace" font-size="5" fill="#c0b0b0" text-anchor="middle">1</text>
+  <text x="288" y="143" font-family="Courier New,monospace" font-size="5" fill="#c0b0b0" text-anchor="middle">0</text>
+  <!-- Knob indicator: top of switch = on, bottom = off.
+       Toggle indicator (light rect) 6×4 at top+1 or bottom-5 of 18-tall body.
+       Same SR bit pattern as ADDRESS for visual interest:
+       bits 9,7,4,3,2 ON — others OFF.
+       Group A (even) #c83020 on / #601010 off
+       Group B (odd)  #8a1018 on / #440810 off -->
+  <!-- G0 ga bit21 off -->
+  <rect x="18"  y="147" width="8" height="18" rx="2" fill="#601010"/>
+  <rect x="19"  y="161" width="6" height="4"  rx="1" fill="rgba(228,192,180,.55)"/>
+  <!-- G1 gb bits 20,19,18 off -->
+  <rect x="34"  y="147" width="8" height="18" rx="2" fill="#440810"/>
+  <rect x="35"  y="161" width="6" height="4"  rx="1" fill="rgba(228,192,180,.55)"/>
+  <rect x="45"  y="147" width="8" height="18" rx="2" fill="#440810"/>
+  <rect x="46"  y="161" width="6" height="4"  rx="1" fill="rgba(228,192,180,.55)"/>
+  <rect x="56"  y="147" width="8" height="18" rx="2" fill="#440810"/>
+  <rect x="57"  y="161" width="6" height="4"  rx="1" fill="rgba(228,192,180,.55)"/>
+  <!-- G2 ga bits 17,16,15 off -->
+  <rect x="72"  y="147" width="8" height="18" rx="2" fill="#601010"/>
+  <rect x="73"  y="161" width="6" height="4"  rx="1" fill="rgba(228,192,180,.55)"/>
+  <rect x="83"  y="147" width="8" height="18" rx="2" fill="#601010"/>
+  <rect x="84"  y="161" width="6" height="4"  rx="1" fill="rgba(228,192,180,.55)"/>
+  <rect x="94"  y="147" width="8" height="18" rx="2" fill="#601010"/>
+  <rect x="95"  y="161" width="6" height="4"  rx="1" fill="rgba(228,192,180,.55)"/>
+  <!-- G3 gb bits 14,13,12 off -->
+  <rect x="110" y="147" width="8" height="18" rx="2" fill="#440810"/>
+  <rect x="111" y="161" width="6" height="4"  rx="1" fill="rgba(228,192,180,.55)"/>
+  <rect x="121" y="147" width="8" height="18" rx="2" fill="#440810"/>
+  <rect x="122" y="161" width="6" height="4"  rx="1" fill="rgba(228,192,180,.55)"/>
+  <rect x="132" y="147" width="8" height="18" rx="2" fill="#440810"/>
+  <rect x="133" y="161" width="6" height="4"  rx="1" fill="rgba(228,192,180,.55)"/>
+  <!-- G4 ga bits 11,10 off / bit9 ON -->
+  <rect x="148" y="147" width="8" height="18" rx="2" fill="#601010"/>
+  <rect x="149" y="161" width="6" height="4"  rx="1" fill="rgba(228,192,180,.55)"/>
+  <rect x="159" y="147" width="8" height="18" rx="2" fill="#601010"/>
+  <rect x="160" y="161" width="6" height="4"  rx="1" fill="rgba(228,192,180,.55)"/>
+  <rect x="170" y="147" width="8" height="18" rx="2" fill="#c83020"/><!-- bit9 ON -->
+  <rect x="171" y="148" width="6" height="4"  rx="1" fill="rgba(228,192,180,.55)"/>
+  <!-- G5 gb bit8 off / bit7 ON / bit6 off -->
+  <rect x="186" y="147" width="8" height="18" rx="2" fill="#440810"/>
+  <rect x="187" y="161" width="6" height="4"  rx="1" fill="rgba(228,192,180,.55)"/>
+  <rect x="197" y="147" width="8" height="18" rx="2" fill="#8a1018"/><!-- bit7 ON -->
+  <rect x="198" y="148" width="6" height="4"  rx="1" fill="rgba(228,192,180,.55)"/>
+  <rect x="208" y="147" width="8" height="18" rx="2" fill="#440810"/>
+  <rect x="209" y="161" width="6" height="4"  rx="1" fill="rgba(228,192,180,.55)"/>
+  <!-- G6 ga bit5 off / bits 4,3 ON -->
+  <rect x="224" y="147" width="8" height="18" rx="2" fill="#601010"/>
+  <rect x="225" y="161" width="6" height="4"  rx="1" fill="rgba(228,192,180,.55)"/>
+  <rect x="235" y="147" width="8" height="18" rx="2" fill="#c83020"/><!-- bit4 ON -->
+  <rect x="236" y="148" width="6" height="4"  rx="1" fill="rgba(228,192,180,.55)"/>
+  <rect x="246" y="147" width="8" height="18" rx="2" fill="#c83020"/><!-- bit3 ON -->
+  <rect x="247" y="148" width="6" height="4"  rx="1" fill="rgba(228,192,180,.55)"/>
+  <!-- G7 gb bit2 ON / bits 1,0 off -->
+  <rect x="262" y="147" width="8" height="18" rx="2" fill="#8a1018"/><!-- bit2 ON -->
+  <rect x="263" y="148" width="6" height="4"  rx="1" fill="rgba(228,192,180,.55)"/>
+  <rect x="273" y="147" width="8" height="18" rx="2" fill="#440810"/>
+  <rect x="274" y="161" width="6" height="4"  rx="1" fill="rgba(228,192,180,.55)"/>
+  <rect x="284" y="147" width="8" height="18" rx="2" fill="#440810"/>
+  <rect x="285" y="161" width="6" height="4"  rx="1" fill="rgba(228,192,180,.55)"/>
 
-  <!-- ── ADDRESS row ── -->
-  <text x="18" y="72" fill="#383840"
-        font-family="'Courier New', Courier, monospace"
-        font-size="8" letter-spacing="2">ADDRESS REGISTER (PC)</text>
-  <text x="362" y="72" fill="#7a5020"
-        font-family="'Courier New', Courier, monospace"
-        font-size="11" text-anchor="end">1234</text>
+  <!-- ── ROTARY SELECTOR INDICATORS ── -->
+  <!-- ADDR SELECT -->
+  <text x="18" y="183" font-family="Helvetica Neue,Arial,sans-serif" font-size="6"
+        fill="#c0b0b0" letter-spacing="0.5">ADDR</text>
+  <!-- P.PHY ON, rest off  (we always EXAMINE PC = PROG PHY) -->
+  <circle cx="52"  cy="178" r="3" fill="#ff2e00"/>
+  <text x="52"  y="187" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#ff6040" text-anchor="middle">P.PHY</text>
+  <circle cx="80"  cy="178" r="3" fill="#2a0808"/>
+  <text x="80"  y="187" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#b0a0a0" text-anchor="middle">K.I</text>
+  <circle cx="104" cy="178" r="3" fill="#2a0808"/>
+  <text x="104" y="187" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#b0a0a0" text-anchor="middle">S.I</text>
+  <circle cx="128" cy="178" r="3" fill="#2a0808"/>
+  <text x="128" y="187" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#b0a0a0" text-anchor="middle">U.I</text>
+  <circle cx="154" cy="178" r="3" fill="#2a0808"/>
+  <text x="154" y="187" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#b0a0a0" text-anchor="middle">C.PHY</text>
+  <circle cx="180" cy="178" r="3" fill="#2a0808"/>
+  <text x="180" y="187" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#b0a0a0" text-anchor="middle">K.D</text>
+  <circle cx="204" cy="178" r="3" fill="#2a0808"/>
+  <text x="204" y="187" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#b0a0a0" text-anchor="middle">S.D</text>
+  <circle cx="228" cy="178" r="3" fill="#2a0808"/>
+  <text x="228" y="187" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#b0a0a0" text-anchor="middle">U.D</text>
+  <!-- DATA SELECT -->
+  <text x="18" y="201" font-family="Helvetica Neue,Arial,sans-serif" font-size="6"
+        fill="#c0b0b0" letter-spacing="0.5">DATA</text>
+  <!-- DSP ON (we always EXAMINE PSW = DISPLAY REGISTER) -->
+  <circle cx="52"  cy="196" r="3" fill="#2a0808"/>
+  <text x="52"  y="205" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#b0a0a0" text-anchor="middle">D/P</text>
+  <circle cx="80"  cy="196" r="3" fill="#2a0808"/>
+  <text x="80"  y="205" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#b0a0a0" text-anchor="middle">BUS</text>
+  <circle cx="104" cy="196" r="3" fill="#2a0808"/>
+  <text x="104" y="205" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#b0a0a0" text-anchor="middle">FPP</text>
+  <circle cx="128" cy="196" r="3" fill="#ff2e00"/>
+  <text x="128" y="205" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#ff6040" text-anchor="middle">DSP</text>
 
-  <!-- PC = 001234 octal → 0000 0010 1001 1100 binary -->
-  <!-- Group 1 (bits 15-12): 0 0 0 0 — all off -->
-  <circle cx="23"  cy="86" r="5" fill="#1a0a00"/>
-  <circle cx="36"  cy="86" r="5" fill="#1a0a00"/>
-  <circle cx="49"  cy="86" r="5" fill="#1a0a00"/>
-  <circle cx="62"  cy="86" r="5" fill="#1a0a00"/>
-  <!-- Group 2 (bits 11-8): 0 0 1 0 — index 2 on -->
-  <circle cx="85"  cy="86" r="5" fill="#1a0a00"/>
-  <circle cx="98"  cy="86" r="5" fill="#1a0a00"/>
-  <circle cx="111" cy="86" r="5" fill="#ff8c00"/>
-  <circle cx="124" cy="86" r="5" fill="#1a0a00"/>
-  <!-- Group 3 (bits 7-4): 1 0 0 1 — indices 0 and 3 on -->
-  <circle cx="147" cy="86" r="5" fill="#ff8c00"/>
-  <circle cx="160" cy="86" r="5" fill="#1a0a00"/>
-  <circle cx="173" cy="86" r="5" fill="#1a0a00"/>
-  <circle cx="186" cy="86" r="5" fill="#ff8c00"/>
-  <!-- Group 4 (bits 3-0): 1 1 0 0 — indices 0 and 1 on -->
-  <circle cx="209" cy="86" r="5" fill="#ff8c00"/>
-  <circle cx="222" cy="86" r="5" fill="#ff8c00"/>
-  <circle cx="235" cy="86" r="5" fill="#1a0a00"/>
-  <circle cx="248" cy="86" r="5" fill="#1a0a00"/>
-
-  <!-- ── DATA row ── -->
-  <text x="18" y="112" fill="#383840"
-        font-family="'Courier New', Courier, monospace"
-        font-size="8" letter-spacing="2">DATA REGISTER (PSW)</text>
-  <text x="362" y="112" fill="#7a5020"
-        font-family="'Courier New', Courier, monospace"
-        font-size="11" text-anchor="end">340</text>
-
-  <!-- PSW = 000340 octal → 0000 0000 1110 0000 binary -->
-  <!-- Group 1 (bits 15-12): 0 0 0 0 -->
-  <circle cx="23"  cy="126" r="5" fill="#1a0a00"/>
-  <circle cx="36"  cy="126" r="5" fill="#1a0a00"/>
-  <circle cx="49"  cy="126" r="5" fill="#1a0a00"/>
-  <circle cx="62"  cy="126" r="5" fill="#1a0a00"/>
-  <!-- Group 2 (bits 11-8): 0 0 0 0 -->
-  <circle cx="85"  cy="126" r="5" fill="#1a0a00"/>
-  <circle cx="98"  cy="126" r="5" fill="#1a0a00"/>
-  <circle cx="111" cy="126" r="5" fill="#1a0a00"/>
-  <circle cx="124" cy="126" r="5" fill="#1a0a00"/>
-  <!-- Group 3 (bits 7-4): 1 1 1 0 — first 3 on -->
-  <circle cx="147" cy="126" r="5" fill="#ff8c00"/>
-  <circle cx="160" cy="126" r="5" fill="#ff8c00"/>
-  <circle cx="173" cy="126" r="5" fill="#ff8c00"/>
-  <circle cx="186" cy="126" r="5" fill="#1a0a00"/>
-  <!-- Group 4 (bits 3-0): 0 0 0 0 -->
-  <circle cx="209" cy="126" r="5" fill="#1a0a00"/>
-  <circle cx="222" cy="126" r="5" fill="#1a0a00"/>
-  <circle cx="235" cy="126" r="5" fill="#1a0a00"/>
-  <circle cx="248" cy="126" r="5" fill="#1a0a00"/>
-
-  <!-- ── Bottom bar content ── -->
-  <text x="18" y="172" fill="#2e2e36"
-        font-family="'Courier New', Courier, monospace"
-        font-size="8" letter-spacing="2">SYSTEM</text>
-  <text x="18" y="189" fill="#ff8c00"
-        font-family="'Courier New', Courier, monospace"
-        font-size="14" letter-spacing="1">2.11BSD</text>
-
-  <!-- Status indicators -->
-  <circle cx="300" cy="169" r="4" fill="#ff8c00"/>
-  <text x="300" y="186" fill="#2a2a30"
-        font-family="'Courier New', Courier, monospace"
-        font-size="7" text-anchor="middle" letter-spacing="1">PROC</text>
-
-  <circle cx="322" cy="169" r="4" fill="#190b00"/>
-  <text x="322" y="186" fill="#2a2a30"
-        font-family="'Courier New', Courier, monospace"
-        font-size="7" text-anchor="middle" letter-spacing="1">BUS</text>
-
-  <circle cx="343" cy="169" r="4" fill="#190b00"/>
-  <text x="343" y="186" fill="#2a2a30"
-        font-family="'Courier New', Courier, monospace"
-        font-size="7" text-anchor="middle">PAR</text>
-
-  <circle cx="363" cy="169" r="4" fill="#190b00"/>
-  <text x="363" y="186" fill="#2a2a30"
-        font-family="'Courier New', Courier, monospace"
-        font-size="7" text-anchor="middle">ERR</text>
-
+  <!-- ── FOOTER BAR ── -->
+  <text x="18" y="236" font-family="Helvetica Neue,Arial,sans-serif" font-size="6"
+        fill="#c0b0b0" letter-spacing="1">System</text>
+  <text x="18" y="250" font-family="Courier New,monospace" font-size="12"
+        fill="#ff5520" letter-spacing="1">211bsd</text>
+  <!-- Control buttons -->
+  <rect x="130" y="226" width="36" height="11" rx="2" fill="#5a1010"/>
+  <text x="148" y="234" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#d8c0c0" text-anchor="middle">LOAD ADRS</text>
+  <rect x="170" y="226" width="26" height="11" rx="2" fill="#5a1010"/>
+  <text x="183" y="234" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#d8c0c0" text-anchor="middle">EXAM</text>
+  <rect x="200" y="226" width="20" height="11" rx="2" fill="#5a1010"/>
+  <text x="210" y="234" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#d8c0c0" text-anchor="middle">DEP</text>
+  <rect x="224" y="226" width="22" height="11" rx="2" fill="#5a1010"/>
+  <text x="235" y="234" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#d8c0c0" text-anchor="middle">CONT</text>
+  <!-- ENABLE active (CPU running) -->
+  <rect x="250" y="226" width="32" height="11" rx="2" fill="#b01808"/>
+  <text x="266" y="234" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#ffffff" text-anchor="middle">ENABLE</text>
+  <rect x="286" y="226" width="26" height="11" rx="2" fill="#5a1010"/>
+  <text x="299" y="234" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#d8c0c0" text-anchor="middle">S INST</text>
+  <rect x="316" y="226" width="26" height="11" rx="2" fill="#5a1010"/>
+  <text x="329" y="234" font-family="Helvetica Neue,Arial,sans-serif" font-size="5.5" fill="#d8c0c0" text-anchor="middle">START</text>
+  <!-- Caption -->
+  <text x="18" y="268" font-family="Helvetica Neue,Arial,sans-serif" font-size="5"
+        fill="#4a2828">20 Hz live lamp animation · SR watch stream 250 ms · mDNS auto-discovery</text>
 </svg>
