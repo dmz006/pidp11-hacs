@@ -1,6 +1,13 @@
 {
   "config": {
     "step": {
+      "zeroconf_confirm": {
+        "title": "Found PiDP-11",
+        "description": "Found a PiDP-11 emulator at **{host}:{port}**.\n\nEnter the shared secret to complete setup. Retrieve it by running:\n```\nssh pdp11@{host} -p 2211 'cat /data/remote_console.secret'\n```",
+        "data": {
+          "shared_secret": "Shared secret"
+        }
+      },
       "user": {
         "title": "Connect to PiDP-11 add-on",
         "description": "Point this integration at the PiDP-11 emulator add-on's remote-console port.\n\n{secret_hint}",

@@ -9,5 +9,6 @@
   "iot_class": "local_polling",
   "dependencies": [],
   "requirements": [],
-  "integration_type": "device"
+  "integration_type": "device",
+  "zeroconf": ["_pidp11._tcp.local."]
 }

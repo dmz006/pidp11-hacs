@@ -8,6 +8,7 @@ from typing import Any
 
 import voluptuous as vol
 
+from homeassistant.components.zeroconf import ZeroconfServiceInfo
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 
 from .const import (
@@ -64,6 +65,11 @@ class PiDP11ConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
 
     VERSION = 1
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._discovered_host: str | None = None
+        self._discovered_port: int | None = None
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -117,4 +123,50 @@ class PiDP11ConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
                     "Find in the add-on log on first boot"
                 )
             },
+        )
+
+    async def async_step_zeroconf(
+        self, discovery_info: ZeroconfServiceInfo
+    ) -> ConfigFlowResult:
+        """Handle zeroconf discovery — pre-fill host/port, ask only for secret."""
+        host = discovery_info.host
+        port = discovery_info.port or DEFAULT_REMOTE_CONSOLE_PORT
+
+        await self.async_set_unique_id(f"{host}:{port}")
+        self._abort_if_unique_id_configured()
+
+        self._discovered_host = host
+        self._discovered_port = port
+        self.context["title_placeholders"] = {"host": host}
+        return await self.async_step_zeroconf_confirm()
+
+    async def async_step_zeroconf_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Confirm zeroconf-discovered device and collect shared secret."""
+        host = self._discovered_host or DEFAULT_HOST
+        port = self._discovered_port or DEFAULT_REMOTE_CONSOLE_PORT
+
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            secret = user_input[CONF_SHARED_SECRET]
+            error = await _validate_connection(host, port, secret)
+            if error:
+                errors["base"] = error
+            else:
+                return self.async_create_entry(
+                    title=f"PiDP-11 ({host})",
+                    data={
+                        CONF_HOST: host,
+                        CONF_REMOTE_CONSOLE_PORT: port,
+                        CONF_SHARED_SECRET: secret,
+                    },
+                )
+
+        return self.async_show_form(
+            step_id="zeroconf_confirm",
+            data_schema=vol.Schema({vol.Required(CONF_SHARED_SECRET): str}),
+            errors=errors,
+            description_placeholders={"host": host, "port": str(port)},
         )

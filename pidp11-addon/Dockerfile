@@ -69,6 +69,7 @@ RUN apt-get update \
         sudo \
         screen \
         python3 \
+        python3-zeroconf \
         curl \
         xz-utils \
  && rm -rf /var/lib/apt/lists/*
@@ -91,13 +92,15 @@ RUN chmod 755 /opt/pidp11/bin/pdp11_realcons \
 COPY systems/ /opt/pidp11/systems/
 
 # Scripts
-COPY getsel.sh       /opt/pidp11/bin/getsel.sh
-COPY authshim.py     /opt/pidp11/bin/authshim.py
-COPY ssh_console.sh  /opt/pidp11/bin/ssh_console.sh
-COPY run.sh          /run.sh
+COPY getsel.sh              /opt/pidp11/bin/getsel.sh
+COPY authshim.py            /opt/pidp11/bin/authshim.py
+COPY zeroconf_advertise.py  /opt/pidp11/bin/zeroconf_advertise.py
+COPY ssh_console.sh         /opt/pidp11/bin/ssh_console.sh
+COPY run.sh                 /run.sh
 RUN chmod +x /run.sh \
              /opt/pidp11/bin/getsel.sh \
              /opt/pidp11/bin/authshim.py \
+             /opt/pidp11/bin/zeroconf_advertise.py \
              /opt/pidp11/bin/ssh_console.sh \
  && useradd -ms /opt/pidp11/bin/ssh_console.sh pdp11 \
  && echo '/opt/pidp11/bin/ssh_console.sh' >> /etc/shells \

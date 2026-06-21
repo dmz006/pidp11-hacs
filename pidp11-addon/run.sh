@@ -148,11 +148,13 @@ _setup_ssh() {
 
 SHIM_PID=""
 DROPBEAR_PID=""
+ZEROCONF_PID=""
 
 cleanup() {
     log "Shutting down..."
-    [[ -n "${SHIM_PID}"     ]] && kill "${SHIM_PID}"     2>/dev/null || true
-    [[ -n "${DROPBEAR_PID}" ]] && kill "${DROPBEAR_PID}" 2>/dev/null || true
+    [[ -n "${SHIM_PID}"      ]] && kill "${SHIM_PID}"      2>/dev/null || true
+    [[ -n "${DROPBEAR_PID}"  ]] && kill "${DROPBEAR_PID}"  2>/dev/null || true
+    [[ -n "${ZEROCONF_PID}"  ]] && kill "${ZEROCONF_PID}"  2>/dev/null || true
     pkill -x pidp1170_blinkenlightd 2>/dev/null || true
     pkill rpcbind 2>/dev/null || true
     screen -S pidp11 -X quit 2>/dev/null || true
@@ -163,6 +165,11 @@ trap cleanup EXIT INT TERM
 log "Starting auth shim (:2223 → SimH :2224)"
 SECRET_FILE="${SECRET_FILE}" python3 "${BIN_DIR}/authshim.py" &
 SHIM_PID=$!
+
+# ── mDNS advertisement — announce _pidp11._tcp.local. on the LAN ─────────────
+log "Starting mDNS advertisement"
+python3 "${BIN_DIR}/zeroconf_advertise.py" &
+ZEROCONF_PID=$!
 
 _setup_ssh
 
