@@ -24,21 +24,25 @@ RUN apt-get update \
         libreadline-dev \
         libtirpc-dev \
         rpcbind \
+        python3 \
+        file \
  && rm -rf /var/lib/apt/lists/*
 
-# Intentionally no libsdl2-dev: quickmake auto-detects SDL2 and skips it,
-# producing a headless binary without the X11/audio dependency chain.
+# Intentionally no libsdl2-dev — see patch_quickmake.py for why.
 
 WORKDIR /build
 RUN git clone --depth 1 https://github.com/obsolescence/pidp11.git . \
  && git fetch --depth 1 origin "${PIDP11_SHA}" \
  && git checkout "${PIDP11_SHA}"
 
-# Build pdp11_realcons (SimH + realcons patch)
+# Patch quickmake to remove VT11 vector-display renderer (not needed headless).
+# See patch_quickmake.py for the full explanation.
+COPY patch_quickmake.py /tmp/patch_quickmake.py
 RUN cd src/02.3_simh/4.x+realcons/src \
- && make -f quickmake
+ && python3 /tmp/patch_quickmake.py \
+ && make -f quickmake VIDEO_CCDEFS="" VIDEO_LDFLAGS="" DISPLAY_OPT=""
 
-# Build pidp1170_blinkenlightd (GPIO/lamp server, used in S4)
+# Build pidp1170_blinkenlightd + scansw (GPIO/lamp server, activated in S4)
 RUN cd src/11_pidp_server/scanswitch \
  && make \
  && cd ../pidp11 \
@@ -47,7 +51,7 @@ RUN cd src/11_pidp_server/scanswitch \
 # ── Stage 2: runtime ─────────────────────────────────────────────────────────
 FROM ${BUILD_FROM}
 
-# Runtime deps — notably no SDL2 since the builder compiled without it.
+# Runtime deps — no SDL2 since the builder compiled without it.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         libpcap0.8 \
