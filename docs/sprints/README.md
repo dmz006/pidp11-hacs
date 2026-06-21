@@ -1,13 +1,14 @@
 # Sprint index
 
-| # | Title                            | Status  | Exit gate                                                             |
-| - | -------------------------------- | ------- | --------------------------------------------------------------------- |
-| 0 | Scaffolding & contracts          | planned | skeleton + failing tests for every public surface; HAOS `/dev/mem` spike decided |
-| 1 | Add-on emulator MVP (no GPIO)    | planned | container boots on amd64 + aarch64; SimH responds on remote console   |
-| 2 | SSH console                      | planned | SSH lands in persistent `screen` session with SimH attached           |
-| 3 | HACS integration                 | planned | config flow installs; core sensors/switches/services green           |
-| 4 | GPIO + multi-arch release        | planned | lamps & switches work on real Pi 5; v1.0 tag, HACS-installable       |
-| 5 | Lamps/switches + Lovelace panel  | planned | front-panel dashboard mirrors physical panel live                     |
+| # | Title                            | Status   | Exit gate                                                             |
+| - | -------------------------------- | -------- | --------------------------------------------------------------------- |
+| 0 | Scaffolding & contracts          | ✅ done  | skeleton + failing tests for every public surface; HAOS `/dev/mem` spike decided |
+| 1 | Add-on emulator MVP (no GPIO)    | ✅ done  | container boots on amd64 + aarch64; SimH responds on remote console   |
+| 2 | SSH console                      | ✅ done  | SSH lands in persistent `screen` session with SimH attached           |
+| 3 | HACS integration                 | ✅ done  | config flow installs; core sensors/switches/services green           |
+| 4 | GPIO + multi-arch release        | ✅ done  | lamps & switches work on real Pi 5; v1.0 tag, HACS-installable       |
+| 5 | Lamps/switches + Lovelace panel  | partial  | card + SR sensors + switch events done; 60 Hz lamps → v1.4           |
+| 6 | Live lamp animation              | planned  | 60 Hz ADDRESS/DATA LEDs in Lovelace via blinkenlightd push channel    |
 
 ## Rules
 

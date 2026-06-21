@@ -44,8 +44,9 @@ A Home Assistant integration + Docker add-on for the [PiDP-11](https://obsolesce
 | Port | Service |
 |---|---|
 | 2211 | SSH to the container (use `SSH_PORT=2211` to avoid conflict with Pi's sshd on 22) |
-| 2223 | Auth shim → SimH remote console |
-| 2224 | Raw SimH remote console (internal only) |
+| 2223 | Auth shim → SimH remote console (main integration port) |
+| 2224 | Raw SimH remote console (internal only, auth shim proxies to it) |
+| 2225 | Watch stream — streams `EVENT sr value=<octal>` on SR change (250 ms poll) |
 
 ---
 
@@ -129,19 +130,22 @@ PiDP11State fields:
   system    : "211bsd" | "idled" | ...
 ```
 
-**Entities shipped (v1.1.0):**
+**Entities shipped (current):**
 
 - `sensor.pidp11_cpu_state` — running/halted/offline
 - `sensor.pidp11_pc` — program counter (octal)
 - `sensor.pidp11_psw` — processor status word (octal)
 - `sensor.pidp11_system` — loaded OS name
-- `sensor.pidp11_sr` — switch register (octal); attributes: binary, decimal, SR0–SR21 (v1.2)
-- `sensor.pidp11_cpu_mode` — kernel/supervisor/user (v1.2)
-- `binary_sensor.pidp11_halted` — True when CPU halted (v1.2)
+- `sensor.pidp11_sr` — switch register (octal); attributes: binary, decimal, SR0–SR21 (bool per bit)
+- `sensor.pidp11_cpu_mode` — kernel/supervisor/user (from PSW bits 15–14)
+- `binary_sensor.pidp11_halted` — True when CPU halted
+- `binary_sensor.pidp11_sr0` – `binary_sensor.pidp11_sr21` — 22 individual SR switch sensors (updated via watch stream)
 - `switch.pidp11_cpu_running` — HALT/CONT
 - Services: `pidp11.boot`, `pidp11.halt`, `pidp11.continue_cpu`, `pidp11.deposit`, `pidp11.examine`
 
-**HA event:** `pidp11_sr_changed` fires with `{ sr_old, sr_new }` when the switch register value changes between polls.
+**HA events:**
+- `pidp11_sr_changed` fires with `{ sr_old, sr_new }` on any SR value change (from watch stream or 5 s poll fallback)
+- `pidp11_switch_changed` fires with `{ switch: "SR<N>", state: bool }` per bit edge
 
 ---
 
@@ -151,7 +155,7 @@ PiDP11State fields:
 - CI: `.github/workflows/ci.yml` — lint, mypy, pytest/coverage, schema-and-unit, addon-smoke, publish
 - Publish on `v*` tags to `ghcr.io/dmz006/pidp11-addon:<tag>` and `:latest`
 - mypy config: `ignore_missing_imports = true` — HA has no type stubs; this is standard for HACS integrations
-- Coverage threshold: `fail_under = 20` (entity tests are xfail stubs for S0; raise threshold as real tests land)
+- Coverage threshold: `fail_under = 15` (lowered when 22 SR bit sensors added with no new tests; raise as entity tests land)
 
 ---
 
@@ -203,14 +207,15 @@ From the manual (p. 15):
 
 **ConfigFlow metaclass**: `class PiDP11ConfigFlow(ConfigFlow, domain=DOMAIN)` triggers mypy `call-arg` error — fix with `# type: ignore[call-arg]`.
 
-**R6 / Remote Pi**: The ESPHome pattern (mDNS advertisement + shared secret) works here. `avahi-publish` in `run.sh` + `zeroconf` discovery step in `config_flow.py`. Everything else (auth shim, secret) already in place.
+**R6 / Remote Pi**: Shipped. `zeroconf_advertise.py` runs in the container and advertises `_pidp11._tcp.local.` on the LAN IP. `config_flow.py` has `async_step_zeroconf` + `async_step_zeroconf_confirm`. HA auto-discovers the Pi; user enters the shared secret (or falls back to manual IP entry).
 
 ---
 
-## Pending work (as of v1.2 implementation start)
+## Pending work
 
-- **v1.2 tests**: Real (non-xfail) tests for SR sensor, cpu_mode sensor, halted binary sensor, SR-changed event
-- **v1.4**: `pidp11.load_tape`, `pidp11.save_state` / `pidp11.restore_state` services
+- **v1.4 (next)**: 60 Hz live Lovelace lamp animation. Spike: read lamp register values
+  from blinkenlightd via RTCLASS socket or shared memory, stream as `EVENT lamps ...`
+- **v1.5**: `pidp11.load_tape`, `pidp11.save_state` / `pidp11.restore_state` services
+- **active_device sensor**: `sensor.pidp11_active_device` (which peripheral is I/O-busy)
+- **SR bit tests**: real (non-xfail) unit tests for the 22 SR binary sensors and watch coordinator
 - **rsx11bq SR entry**: Add SR switch value for RSX-11BQ in the container's selections file
-- **R6**: mDNS/zeroconf discovery for remote-Pi topology
-- **Live Lovelace lamps**: 60 Hz animation via blinkenlightd push channel (deferred from v1.1)

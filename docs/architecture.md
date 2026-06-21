@@ -9,12 +9,19 @@ running Home Assistant OS, so the same hardware can host HA and the
 PiDP-11 at once. Beyond parity, expose the emulator to HA so it can be
 observed and driven from automations and Lovelace.
 
-## 2. Topology (target)
+## 2. Topology
 
-One Raspberry Pi 5, HAOS installed, PiDP-11 hat on the 40-pin header.
-No external hosts. GPIO is shared between the Pi 5's RP1 I/O controller
-and the SimH GPIO driver running inside the add-on container via
-`/dev/mem` mmap.
+Two supported topologies:
+
+**Topology A (single-Pi):** One Raspberry Pi 5 runs HAOS with the PiDP-11 hat on
+the 40-pin header. The add-on container and the HA integration both run on the Pi.
+GPIO is shared between the Pi 5's RP1 I/O controller and the SimH GPIO driver
+inside the add-on via `/dev/mem` mmap. Integration connects to `127.0.0.1:2223`.
+
+**Topology B (remote):** Pi 5 runs the Docker image as a standalone container
+(no HAOS required). Home Assistant runs on a separate host on the same LAN. The
+add-on advertises itself via mDNS (`_pidp11._tcp.local.`) and the HACS integration
+auto-discovers it. Integration connects to the Pi's LAN IP on port 2223.
 
 ## 3. Component split
 
@@ -31,9 +38,15 @@ Container image built from `debian:bookworm-slim`:
   `screen -RR pidp11` so every SSH session attaches to the single
   persistent console. `^A d` detaches, SSH exit leaves the emulator
   running.
-- **SimH remote console** listens on container `:2223` (host `:2223`),
-  used by the HA integration for out-of-band control that does not
-  interfere with the user's primary console.
+- **authshim** (`authshim.py`) sits between HA and SimH: listens on `:2223`
+  (host-mapped), gates with `AUTH <secret>` handshake, then proxies to SimH's
+  native remote console on `:2224` (internal only).
+- **Watch stream** listens on `:2225` (host `:2225`). Same auth handshake, then
+  polls SimH `EXAMINE SR` every 250 ms and streams `EVENT sr value=<octal>` when
+  the SR register changes. Allows the integration to detect switch changes without
+  waiting for the 5 s coordinator poll.
+- **zeroconf advertisement** (`zeroconf_advertise.py`) runs as a background process,
+  advertising `_pidp11._tcp.local.` on the LAN IP so HA can auto-discover the Pi.
 - **Disk images**: symlinked from `/share/pidp11/disks/` (bind-mount
   from HAOS share), bundled defaults provisioned on first start if
   missing.
@@ -50,19 +63,19 @@ Runs with `privileged: [SYS_RAWIO]`, `devices: [/dev/mem]`. No
 Pure Python, no C. Talks to the add-on over its remote-console TCP
 port (default 2223). Provides:
 
-- `config_flow.py` — UI setup (host, remote-console port, shared
-  secret). Stores an entry in HA's config registry.
-- `coordinator.py` — a `DataUpdateCoordinator` that polls the remote
-  console every N seconds for CPU state, and consumes async events
-  (HALT, TRAP) over a persistent connection.
-- `sensor.py` — `sensor.pidp11_state` (running/halted/idle),
-  `sensor.pidp11_pc` (program counter), `sensor.pidp11_last_error`.
-- `switch.py` — `switch.pidp11_power` (start/halt), and for the
-  post-v1 roadmap, one switch per front-panel toggle.
-- `services.yaml` — `pidp11.boot`, `pidp11.halt`, `pidp11.deposit`,
-  `pidp11.examine`, `pidp11.load_tape`.
-- Events — fires `pidp11_halt`, `pidp11_trap` on the HA event bus for
-  automations.
+- `config_flow.py` — user-initiated setup (host, port, shared secret) plus
+  `async_step_zeroconf` / `async_step_zeroconf_confirm` for mDNS auto-discovery.
+- `coordinator.py` — `DataUpdateCoordinator` polling every 5 s for
+  `PiDP11State(cpu_state, pc, psw, sr, cpu_mode, system)`. Also maintains a
+  background watch-stream task (`_run_sr_watch`) on port 2225 for 250 ms SR updates.
+- `sensor.py` — `cpu_state`, `pc`, `psw`, `system`, `sr` (+ binary/decimal/bit
+  attributes), `cpu_mode` (kernel/supervisor/user).
+- `binary_sensor.py` — `halted`, plus 22 SR bit sensors `SR0`–`SR21`.
+- `switch.py` — `cpu_running` (HALT/CONT).
+- Services: `pidp11.boot`, `pidp11.halt`, `pidp11.continue_cpu`, `pidp11.deposit`,
+  `pidp11.examine`.
+- Events: `pidp11_sr_changed` (sr_old, sr_new), `pidp11_switch_changed` (switch,
+  state) per SR bit edge.
 
 ### 3.3 Control plane contract
 
@@ -82,10 +95,14 @@ See `docs/diagrams.md` for rendered diagrams.
 - **User console path**: user → TCP :2211 → dropbear → wrapper shell
   → `screen -RR pidp11` → SimH primary console. Detach/reattach-safe.
 - **HA control path**: automation → HA service `pidp11.boot` →
-  integration → TCP :2223 → SimH remote console → response → HA
+  integration → TCP :2223 (auth shim) → SimH remote console → response → HA
   entity state update.
-- **GPIO path**: SimH process inside container → `/dev/mem` mmap →
-  RP1 IO_BANK / PADS_BANK registers → ribbon cable → PiDP-11 lamps &
+- **Watch stream path**: coordinator background task → TCP :2225 (watch stream)
+  → auth shim polls `EXAMINE SR` every 250 ms → `EVENT sr value=<octal>` → coordinator
+  fires `pidp11_sr_changed` + per-bit `pidp11_switch_changed` events + updates
+  `binary_sensor.pidp11_sr0`–`sr21` immediately via `async_set_updated_data`.
+- **GPIO path**: SimH process inside container → ONC RPC → blinkenlightd →
+  `/dev/mem` mmap → RP1 IO_BANK / PADS_BANK registers → ribbon cable → PiDP-11 lamps &
   switches.
 - **Persistence path**: SimH writes disk images under
   `/share/pidp11/disks/*.dsk` on the HAOS share, visible to the user
@@ -107,17 +124,19 @@ See `docs/diagrams.md` for rendered diagrams.
 ## 6. What is deliberately out of scope for v1
 
 - Multi-emulator (PDP-8, PDP-10) — handled as sibling add-ons, later.
-- Remote Pi topology (HA on one box, PiDP-11 on another) — requires a
-  network GPIO bridge; noted in `docs/roadmap.md` as R6.
 - VT11/Tektronix vector display emulation (upstream issue #14).
+- 60 Hz live Lovelace lamp animation — requires a blinkenlightd push channel
+  (RTCLASS protocol read or upstream socket). Tracked as v1.4 in roadmap.
 
 ## 7. Supported targets
 
-**HAOS** and **HA Supervised** only. Both ship the Supervisor and can
-install the add-on that runs the emulator container. HA Container and
-HA Core are **not** supported targets — they do not have the Supervisor
-channel, and we will not ask users to run `docker run` by hand. This
-cuts the testing matrix and the documentation surface to one shape.
+**Topology A (HAOS / HA Supervised):** Both ship the Supervisor and can install the
+add-on container. Tested end-to-end on Pi 5 + HAOS.
+
+**Topology B (remote):** The Docker image runs standalone on any Pi 5 with Docker.
+HA on a separate LAN host installs the HACS integration and connects via IP:2223 or
+via mDNS auto-discovery. HA Container and HA Core are supported in this topology
+(they can install HACS integrations, just not Supervisor add-ons).
 
 ## 8. Build & release model
 

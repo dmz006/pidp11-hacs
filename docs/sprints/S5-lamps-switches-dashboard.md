@@ -1,6 +1,6 @@
 # Sprint 5 — Lamps, Switches, and Lovelace Front-Panel Dashboard
 
-**Owner:** TBD. **Status:** phase-1-complete (Lovelace card shipped Jun 21 2026; phase 2 — real-time lamps — needs driver push channel, deferred post-v1.0).
+**Owner:** TBD. **Status:** partial — Lovelace card + SR sensors + switch events shipped Jun 21 2026. Phase 2 (60 Hz lamps) deferred to v1.4 / S6.
 
 ## Goal
 
@@ -37,21 +37,17 @@ push-notification socket from the driver.
 
 ### Lamp & switch pipeline
 
-1. **Driver channel.** The pidp11 GPIO driver gets a new path to push
-   lamp/switch state out: either (a) Unix socket inside the
-   container that the integration reads, or (b) piggy-back on the
-   existing remote console with `EVENT …` lines. Decide in a spike
-   in this sprint.
-2. **Register sensor.** `sensor.pidp11_registers` — single entity
-   whose state is a compact JSON blob of all lamps + switches,
-   updated at driver rate. Attributes break out each field.
-3. **Binary sensors.** One per switch: `binary_sensor.pidp11_sw_halt`,
-   `…_sw_start`, `…_sw_continue`, `…_sw_examine`, `…_sw_deposit`,
-   `…_sw_load_addr`, `…_sw_boot` (per PiDP-11 layout). Updated from
-   the same channel.
-4. **Events.** `pidp11_switch { name, state, ts }` on every edge.
-5. **Write path.** HA → physical lamp overrides? Out of scope for v1.1
-   unless the user wants it — surface in roadmap as a question.
+1. ✅ **SR watch stream (250 ms).** `authshim.py` opens a dedicated SimH connection
+   on port 2225, polls `EXAMINE SR` every 250 ms, and streams `EVENT sr value=<octal>`
+   when the value changes. No blinkenlightd changes required.
+2. ✅ **SR binary sensors.** 22 entities `binary_sensor.pidp11_sr0`–`sr21`, updated
+   immediately via `async_set_updated_data` on each watch stream event.
+3. ✅ **SR sensor.** `sensor.pidp11_sr` with binary, decimal, and per-bit attributes.
+4. ✅ **Switch events.** `pidp11_switch_changed` (per SR bit edge) and `pidp11_sr_changed`
+   (overall SR value change).
+5. ⏳ **60 Hz lamp animation.** Requires reading lamp register values from blinkenlightd
+   at ~60 Hz. Deferred to v1.4 / S6. Options: RTCLASS socket, shared memory read, or
+   upstream PR adding a push socket to the driver.
 
 ## Tests
 

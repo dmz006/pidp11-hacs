@@ -133,28 +133,60 @@ sequenceDiagram
     I->>HA: fire event pidp11_boot
 ```
 
-## 6. Sequence — GPIO switch read -> HA state change (roadmap)
+## 6. Sequence — SR switch change → HA binary sensor (watch stream)
 
 ```mermaid
 sequenceDiagram
     actor U as User (hat)
     participant G as RP1 GPIO
-    participant D as pidp11 GPIO driver
+    participant D as blinkenlightd
     participant E as SimH pdp11
-    participant RC as remote console
-    participant I as integration
+    participant W as authshim watch :2225
+    participant C as coordinator._run_sr_watch
     participant HA as homeassistant runtime
 
-    U->>G: flip SW_START
-    G->>D: input sample
-    D->>E: set console register
-    D->>RC: async notify SWITCH START=1
-    RC-->>I: "EVENT switch start 1\n"
-    I->>HA: fire event pidp11_switch pressed=start
-    I->>HA: switch.pidp11_start -> on
+    U->>G: flip SR switch N
+    G->>D: GPIO sample
+    D->>E: SR register updated via ONC RPC
+    Note over W: polls EXAMINE SR every 250 ms
+    W->>E: "EXAMINE SR\n"
+    E-->>W: "SR:\t<new octal>\nsim> "
+    W->>C: "EVENT sr value=<octal>\n"
+    C->>HA: async_set_updated_data (sr=new)
+    C->>HA: fire pidp11_switch_changed {switch: "SRN", state: true}
+    C->>HA: fire pidp11_sr_changed {sr_old, sr_new}
+    HA->>HA: binary_sensor.pidp11_srN -> on
 ```
 
-## 7. Install-time view
+## 7. Topology B — Remote Pi deployment
+
+```mermaid
+graph TB
+    subgraph Pi5["Raspberry Pi 5 + PiDP-11 hat"]
+        subgraph DockerHost["Docker (standalone)"]
+            addon[[pidp11-addon<br/>container]]
+            zc[zeroconf_advertise.py<br/>_pidp11._tcp.local.]
+            simh[(SimH)]
+            blink[blinkenlightd]
+        end
+        hat{{PiDP-11 hat}}
+    end
+
+    subgraph RemoteHost["LAN host (NUC, VM, etc.)"]
+        ha[[Home Assistant<br/>+ HACS pidp11 integration]]
+    end
+
+    zc -. "mDNS :5353" .-> ha
+    ha -- "TCP :2223 auth shim" --> addon
+    ha -- "TCP :2225 watch stream" --> addon
+    addon --> simh
+    simh -- "ONC RPC" --> blink
+    blink -- "/dev/mem mmap" --> hat
+```
+
+## 8. Install-time view
+
+## 9. Install-time view
 
 ```mermaid
 graph LR

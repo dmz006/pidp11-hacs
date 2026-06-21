@@ -40,9 +40,9 @@ per user ask. See `docs/sprints/S5-lamps-switches-dashboard.md`.~~
 
 ---
 
-## v1.2 — Switch events in HA
+## ~~v1.2 — Switch events in HA~~ ✅ shipped (minus 60 Hz lamps)
 
-Every physical switch throw fires an HA event
+~~Every physical switch throw fires an HA event
 (`pidp11_switch { name, state, timestamp }`). Each switch also has a
 `binary_sensor.pidp11_sw_<name>` so users can build automations like
 "when SR register = 0o177777, blink the office lamp." Depends on a
@@ -51,14 +51,36 @@ console — needs an upstream PR or a sidecar reader of the driver's
 shared memory. Spike in S5.
 
 Also includes live Lovelace lamp animation (60 Hz via blinkenlightd push channel)
-deferred from v1.1.
+deferred from v1.1.~~
 
-## v1.3 — Richer register sensors
+> **Shipped (partial):** 22 SR bit binary sensors (`binary_sensor.pidp11_sr0`–`sr21`),
+> `pidp11_switch_changed` HA event per bit, `pidp11_sr_changed` HA event. Implemented
+> via a 250 ms `EXAMINE SR` push channel on port 2225 (authshim watch stream) rather
+> than the blinkenlightd driver — no upstream changes needed.
+>
+> **Not done:** 60 Hz Lovelace lamp animation. Still requires a blinkenlightd push
+> channel (RTCLASS protocol or new socket). Tracked as v1.5.
 
-- `sensor.pidp11_sr` (switch register, 0-7777 octal), attributes for
-  binary representation.
-- `sensor.pidp11_mmu_state` (kernel/super/user mode).
-- `sensor.pidp11_active_device` (which peripheral is I/O-busy).
+## ~~v1.3 — Richer register sensors~~ ✅ shipped (partial)
+
+~~- `sensor.pidp11_sr` (switch register, 0-7777 octal), attributes for
+  binary representation.~~
+~~- `sensor.pidp11_mmu_state` (kernel/super/user mode).~~
+- `sensor.pidp11_active_device` (which peripheral is I/O-busy). ⏳ not yet done.
+
+> **Shipped:** `sensor.pidp11_sr` (octal + binary/decimal attributes + SR0–SR21 bool
+> attributes), `sensor.pidp11_cpu_mode` (kernel/supervisor/user from PSW bits 15–14),
+> `binary_sensor.pidp11_halted`.
+
+## ~~R6 — Remote-Pi topology~~ ✅ shipped
+
+~~Run HA on an Intel NUC (or any host) and the PiDP-11 on a separate Pi 5.
+Integration targets the remote Pi over the network; no local add-on required.~~
+
+> **Shipped:** `zeroconf_advertise.py` in the add-on advertises `_pidp11._tcp.local.`
+> on the LAN IP. `config_flow.py` adds `async_step_zeroconf` + `async_step_zeroconf_confirm`
+> so HA auto-discovers the Pi and asks only for the shared secret. Manual IP/port entry
+> still works as a fallback. See README Topology B.
 
 ## v1.4 — Tape / paper-tape / disk library service
 
@@ -82,29 +104,28 @@ second SimH process in another container, runs a scenario, discards.
 Useful for "will my boot script succeed" kind of automations. Needs
 resource guardrails.
 
-## R6 — Remote-Pi topology
+## v1.4 — 60 Hz live Lovelace lamp animation
 
-Run HA on an Intel NUC (or any host) and the PiDP-11 on a separate Pi 5.
-Integration targets the remote Pi over the network; no local add-on required.
+Real-time ADDRESS/DATA LED animation in the Lovelace card (deferred from v1.1 → v1.2 → now v1.4).
+Requires reading lamp state from `pidp1170_blinkenlightd` at the driver's update rate. Options:
 
-The auth + discovery pattern is already solved by **ESPHome**: the Pi advertises
-itself via mDNS (`_pidp11._tcp.local`), HA auto-discovers it, and the user confirms
-with a shared secret — no IP addresses to copy. We already have the shared-secret
-mechanism in `config_flow.py` and the TCP remote-console socket. The delta is:
+- **RTCLASS reader**: blinkenlightd speaks the RTCLASS wire protocol and exposes lamp
+  state. Connect to it directly from authshim and stream `EVENT lamps ...` to the coordinator.
+- **Shared memory poll**: blinkenlightd writes lamp state to shared memory; poll it in authshim.
+- **Upstream PR**: new push socket in pidp11 driver (was spike item in S5 plan).
 
-- `run.sh`: advertise via `avahi-publish` or a small Python `zeroconf` call
-- `config_flow.py`: add a `zeroconf` discovery step (same pattern as ESPHome
-  and most network integrations)
-- Noise protocol encryption on the remote-console socket (optional but clean)
+**Next steps:** spike which blinkenlightd interface is accessible from authshim without
+modifying the binary, then stream lamp register values through the existing EVENT channel
+or a new port 2226.
 
-The underlying PiDP-11 connectivity model (Pi as device, HA as controller,
-shared secret for auth) is structurally identical to ESPHome's model for ESP32s.
-Not in v1 because the user confirmed the single-Pi target.
+## v1.5 — Tape / paper-tape / disk library service
 
 ## Priority order
 
 1. ~~v1.1 Lovelace panel dashboard~~ ✅ done
-2. v1.2 Switch events in HA + live lamps.
-3. v1.3 Register sensors.
-4. v1.4 Tape/state services.
-5. v2+ later.
+2. ~~v1.2 Switch events + SR sensors~~ ✅ done (250 ms watch stream; 60 Hz lamps → v1.5)
+3. ~~v1.3 SR/cpu_mode sensors~~ ✅ done (active_device pending)
+4. ~~R6 Remote-Pi mDNS topology~~ ✅ done
+5. v1.4 60 Hz lamp animation. ← **next up**
+6. v1.5 Tape/state services.
+7. v2+ later.

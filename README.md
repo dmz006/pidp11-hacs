@@ -45,8 +45,8 @@ per second and the lamps would be a blur. Think of it as a heartbeat display: yo
 where the CPU is parked between polling ticks.
 
 Full real-time lamp animation (matching the physical hat's 60 Hz LED update rate) is
-the goal for S5 phase 2 and requires a dedicated push-notification channel from the
-`pidp1170_blinkenlightd` GPIO driver. See [S5 sprint plan](./docs/sprints/S5-lamps-switches-dashboard.md).
+the goal for v1.4 and requires reading lamp state from `pidp1170_blinkenlightd`.
+See [S5 sprint plan](./docs/sprints/S5-lamps-switches-dashboard.md) and [roadmap](./docs/roadmap.md).
 
 ### Optional entity overrides
 
@@ -70,8 +70,8 @@ different channels:
 
 | Artifact | Channel | What it does |
 |----------|---------|--------------|
-| **`pidp11-addon/`** | Supervisor add-on | Docker container running SimH + GPIO lamp/switch driver (`pidp1170_blinkenlightd`) + SSH console via `dropbear`. Needs `/dev/gpiomem*` on Pi 5 with the PiDP-11 hat. |
-| **`custom_components/pidp11/`** | HACS Integration | Python integration exposing HA entities, services, and the Lovelace card. Talks to the add-on over the auth-shim TCP port (default 2223). |
+| **`pidp11-addon/`** | Supervisor add-on or standalone Docker | Container running SimH + GPIO lamp/switch driver (`pidp1170_blinkenlightd`) + auth shim (port 2223) + SR watch stream (port 2225) + mDNS advertisement + SSH console. |
+| **`custom_components/pidp11/`** | HACS Integration | Python integration exposing HA entities, services, and the Lovelace card. Connects to the add-on over TCP (local `127.0.0.1:2223` or remote Pi IP via mDNS auto-discovery). |
 
 The add-on includes a boot-select encoder: at startup it reads the front-panel SR
 switches via `scansw` and boots the OS whose octal code matches the switch pattern
@@ -205,6 +205,13 @@ is right there. Type `HALT`, then `EXAMINE PC`, then `CONTINUE` — watch the LE
 | `pidp11.examine` | `address` | Returns the value at a SimH address/register |
 | `pidp11.deposit` | `address`, `value` | Deposits a value (octal) at address |
 | `pidp11.boot` | `target` | Boots a system by name |
+
+### Events
+
+| Event | Payload | When fired |
+|-------|---------|------------|
+| `pidp11_sr_changed` | `{ sr_old, sr_new }` | SR register changes (from watch stream or 5 s poll) |
+| `pidp11_switch_changed` | `{ switch: "SR<N>", state: bool }` | Individual SR bit edge (from watch stream) |
 
 Example automation — announce when the PDP-11 halts:
 ```yaml
