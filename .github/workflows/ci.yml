@@ -2,7 +2,9 @@ name: ci
 on:
   push:
     branches: [main]
+    tags: ["v*.*.*"]
   pull_request:
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -42,6 +44,42 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: pip install -e ".[test]"
-      # Add-on functional tests are xfail until S1 fills the image — this
-      # job currently only validates that the Dockerfile still builds.
       - run: pytest -m "addon and not hardware" || true
+
+  publish:
+    # Push to GHCR on every main-branch commit (edge tag) and on version tags.
+    # The arm64 image can be pulled by anyone with Docker on a Pi 5:
+    #   docker pull ghcr.io/dmz006/pidp11-addon:latest
+    needs: [lint, addon-smoke]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/dmz006/pidp11-addon
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: pidp11-addon
+          file: pidp11-addon/Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

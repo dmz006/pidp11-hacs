@@ -80,7 +80,27 @@ add-on option.
 
 ---
 
-## Supported targets
+## Running without Home Assistant
+
+Just want the blinking lights without HA? The same Docker image runs as a
+standalone PDP-11 on any Raspberry Pi 5 with Docker installed — pull, run,
+SSH in, enjoy.
+
+```bash
+docker run -d --name pidp11 --restart unless-stopped \
+  --privileged --network host \
+  -v /run/rpcbind.sock:/run/rpcbind.sock \
+  -v "$HOME/.pidp11/share:/share" \
+  -v pidp11-data:/data \
+  -e SSH_PASSWORD=pdp11 \
+  ghcr.io/dmz006/pidp11-addon:latest
+```
+
+Full instructions, prerequisites, and OS boot table: **[docs/standalone-docker.md](./docs/standalone-docker.md)**
+
+---
+
+## Supported targets (HA)
 
 **HAOS** and **HA Supervised** only. Both ship Supervisor so both can install the
 add-on container. HA Container and HA Core are not supported — they have no Supervisor.
