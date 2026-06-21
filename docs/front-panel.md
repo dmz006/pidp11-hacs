@@ -47,8 +47,10 @@ showing the SR switch value in binary — useful for finding the right switch se
 **To boot into a specific OS:**
 
 1. Set the SR switches to the octal value from the table above.
-2. **Press the ADDR rotary encoder center button** (the knob on the left side of the
-   address LEDs — this is the `LOAD ADDRESS` switch on the real PDP-11/70).
+2. **Press the ADDR rotary encoder center button** — the knob on the left side of the
+   address LEDs. On a real PDP-11/70 this is the `LOAD ADDRESS` switch; on the PiDP-11
+   it has a hidden extra function (not on the real hardware): pressing it signals SimH
+   to exit and restart into whichever OS the SR switches select.
 3. The running OS halts, SimH exits, and the container reads the SR switches and
    boots the selected OS.
 
