@@ -290,6 +290,14 @@ while true; do
     log "Launching SimH in screen session 'pidp11'"
     screen -dmS pidp11 "${SIMH}" "${SHM_DIR}/tmpsimhcommand.txt"
 
+    # 2.11BSD's second-stage bootloader does not auto-boot — it waits at the
+    # ':' prompt indefinitely.  Send 'unix<CR>' after a short delay so the OS
+    # boots unattended.  Other systems don't show this prompt, so the stuff is
+    # harmless (goes to the OS console after it's already running).
+    if [[ "${SEL}" == "211bsd" ]]; then
+        ( sleep 5; screen -x pidp11 -X stuff "unix$(printf '\r')" ) &
+    fi
+
     # Wait for screen/SimH to exit
     while screen -list 2>/dev/null | grep -q '\.pidp11'; do
         sleep 5
