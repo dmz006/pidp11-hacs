@@ -37,5 +37,7 @@ CPU_MODE_USER: Final = "user"
 
 EVENT_SR_CHANGED: Final = "pidp11_sr_changed"
 EVENT_SWITCH_CHANGED: Final = "pidp11_switch_changed"
+EVENT_LAMPS: Final = "pidp11_lamps"
 
 WATCH_PORT_OFFSET: Final = 2
+LAMP_PORT_OFFSET: Final = 3

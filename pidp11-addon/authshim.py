@@ -7,6 +7,9 @@ then proxies the byte stream to SimH's native remote console on SIMH_PORT (defau
 Also serves a watch stream on WATCH_PORT (default 2225) that streams SR register
 changes in near-real-time by maintaining a single long-lived SimH connection.
 
+Also serves a lamp stream on LAMP_PORT (default 2226) that streams PC/PSW register
+values at ~20 Hz for the Lovelace live animation.
+
 Wire protocol is documented in docs/contracts/remote-console.md.
 """
 import asyncio
@@ -25,6 +28,8 @@ _CONNECT_TIMEOUT = 5.0
 _DRAIN_QUIET = 0.3
 WATCH_PORT = int(os.environ.get("WATCH_PORT", str(LISTEN_PORT + 2)))
 WATCH_INTERVAL_MS = float(os.environ.get("WATCH_INTERVAL_MS", "250"))
+LAMP_PORT = int(os.environ.get("LAMP_PORT", str(LISTEN_PORT + 3)))
+LAMP_INTERVAL_MS = float(os.environ.get("LAMP_INTERVAL_MS", "50"))  # 20 Hz
 
 
 def _load_secret() -> str:
@@ -33,9 +38,10 @@ def _load_secret() -> str:
 
 
 def _parse_sr(text: str) -> str | None:
-    """Extract octal value from SimH SR register output.
+    """Extract octal value from SimH register output.
 
     Scans all lines for 'REG:\\t<octal>' pattern and returns the first match.
+    Works for SR, PC, PSW — they all use the same format.
     """
     for line in text.replace("\r\n", "\n").replace("\r", "\n").splitlines():
         m = re.match(r"\S+:\s+([0-7]+)", line.strip())
@@ -58,6 +64,22 @@ async def _drain_simh_banner(reader: asyncio.StreamReader) -> None:
                 break
         except asyncio.TimeoutError:
             break
+
+
+async def _poll_register(
+    simh_r: asyncio.StreamReader,
+    simh_w: asyncio.StreamWriter,
+    cmd: str,
+) -> str | None:
+    """Send one EXAMINE command, read to sim>, return parsed register value."""
+    simh_w.write(f"{cmd}\n".encode())
+    await simh_w.drain()
+    try:
+        raw = await asyncio.wait_for(simh_r.readuntil(_PROMPT), timeout=_CONNECT_TIMEOUT)
+    except (asyncio.TimeoutError, asyncio.IncompleteReadError):
+        return None
+    text = raw[: -len(_PROMPT)].decode(errors="replace")
+    return _parse_sr(text)
 
 
 async def _handle_watch(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -150,6 +172,90 @@ async def _handle_watch(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             pass
 
 
+async def _handle_lamp_stream(
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+) -> None:
+    """Handle a lamp stream connection.
+
+    Protocol:
+    1. Client sends AUTH <secret>\\n
+    2. Server responds OK\\n
+    3. Server opens dedicated SimH connection, drains banner
+    4. Server polls EXAMINE PC + EXAMINE PSW every LAMP_INTERVAL_MS ms, streams
+       EVENT lamps ADDRESS=<pc> DATA=<psw>\\n on change
+    5. Connection kept alive until client disconnects
+    """
+    peer = writer.get_extra_info("peername")
+    try:
+        try:
+            raw = await asyncio.wait_for(reader.readline(), timeout=AUTH_TIMEOUT)
+        except asyncio.TimeoutError:
+            writer.write(b"DENY auth-timeout\n")
+            await writer.drain()
+            return
+
+        parts = raw.decode(errors="replace").rstrip("\r\n").split(" ", 1)
+        if len(parts) != 2 or parts[0] != "AUTH" or parts[1] != _load_secret():
+            writer.write(b"DENY bad-auth\n")
+            await writer.drain()
+            return
+
+        writer.write(b"OK\n")
+        await writer.drain()
+
+        try:
+            simh_r, simh_w = await asyncio.wait_for(
+                asyncio.open_connection("127.0.0.1", SIMH_PORT),
+                timeout=_CONNECT_TIMEOUT,
+            )
+        except (ConnectionRefusedError, asyncio.TimeoutError):
+            return
+
+        try:
+            await _drain_simh_banner(simh_r)
+
+            prev_pc: str | None = None
+            prev_ps: str | None = None
+            interval_s = LAMP_INTERVAL_MS / 1000.0
+
+            while True:
+                if writer.is_closing():
+                    break
+
+                pc = await _poll_register(simh_r, simh_w, "EXAMINE PC")
+                if pc is None:
+                    break
+                ps = await _poll_register(simh_r, simh_w, "EXAMINE PSW")
+                if ps is None:
+                    break
+
+                if prev_pc is None or pc != prev_pc or ps != prev_ps:
+                    writer.write(f"EVENT lamps ADDRESS={pc} DATA={ps}\n".encode())
+                    await writer.drain()
+                    prev_pc = pc
+                    prev_ps = ps
+
+                await asyncio.sleep(interval_s)
+
+        finally:
+            try:
+                simh_w.close()
+                await simh_w.wait_closed()
+            except Exception:
+                pass
+
+    except (ConnectionResetError, BrokenPipeError, asyncio.IncompleteReadError):
+        pass
+    except Exception as exc:
+        print(f"[authshim] lamp error from {peer}: {exc}", file=sys.stderr, flush=True)
+    finally:
+        try:
+            writer.close()
+            await writer.wait_closed()
+        except Exception:
+            pass
+
+
 async def _pipe(src: asyncio.StreamReader, dst: asyncio.StreamWriter) -> None:
     try:
         while True:
@@ -210,12 +316,18 @@ async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) ->
 async def _main() -> None:
     server = await asyncio.start_server(_handle, "0.0.0.0", LISTEN_PORT)
     watch_server = await asyncio.start_server(_handle_watch, "0.0.0.0", WATCH_PORT)
+    lamp_server = await asyncio.start_server(_handle_lamp_stream, "0.0.0.0", LAMP_PORT)
     print(
-        f"[authshim] :{LISTEN_PORT} → SimH :{SIMH_PORT}  |  watch :{WATCH_PORT}",
+        f"[authshim] :{LISTEN_PORT} → SimH :{SIMH_PORT}"
+        f"  |  watch :{WATCH_PORT}  |  lamps :{LAMP_PORT}",
         flush=True,
     )
-    async with server, watch_server:
-        await asyncio.gather(server.serve_forever(), watch_server.serve_forever())
+    async with server, watch_server, lamp_server:
+        await asyncio.gather(
+            server.serve_forever(),
+            watch_server.serve_forever(),
+            lamp_server.serve_forever(),
+        )
 
 
 if __name__ == "__main__":

@@ -17,11 +17,13 @@ ports:
   "22/tcp": 2211
   "2223/tcp": 2223
   "2225/tcp": 2225
+  "2226/tcp": 2226
   "4000/tcp": 4000
 ports_description:
   "22/tcp": SSH to PDP-11 console (screen)
   "2223/tcp": SimH remote console (HA integration only)
   "2225/tcp": SR watch stream — real-time switch register events (HA integration only)
+  "2226/tcp": Lamp stream — 20 Hz PC/PSW for Lovelace animation (HA integration only)
   "4000/tcp": DZ11 terminal lines — telnet into running 211bsd OS
 map:
   - share:rw

@@ -4,6 +4,10 @@
  * Renders an amber-on-dark blinkenlight panel showing the PDP-11/70 CPU
  * registers read from the PiDP-11 HA integration.
  *
+ * Live animation: subscribes to pidp11_lamps HA events fired by the
+ * coordinator's lamp watch task (port 2226, 20 Hz poll of EXAMINE PC/PSW).
+ * LED state is updated via requestAnimationFrame without rebuilding the DOM.
+ *
  * Lovelace config example:
  *   type: custom:pidp11-panel-card
  *
@@ -32,14 +36,16 @@
     return bits;
   }
 
-  // Render a row of LEDs. groups = array of counts per group, e.g. [4,4,4,4].
-  function ledRow(bits, groups) {
+  // Render a row of LEDs with a type class for targeted querySelectorAll.
+  // groups = array of counts per group, e.g. [4,4,4,4].
+  // cls = extra class added to each LED span (e.g. 'adr' or 'dat').
+  function ledRow(bits, groups, cls) {
     let html = '<div class="leds">';
     let idx = 0;
     groups.forEach(function (count, gi) {
       if (gi > 0) html += '<span class="sep"></span>';
       for (let k = 0; k < count; k++, idx++) {
-        html += '<span class="led ' + (bits[idx] ? "on" : "off") + '"></span>';
+        html += '<span class="led ' + cls + " " + (bits[idx] ? "on" : "off") + '"></span>';
       }
     });
     return html + "</div>";
@@ -220,6 +226,13 @@
   var PiDP11PanelCard = (function () {
     function PiDP11PanelCard() {
       this.attachShadow({ mode: "open" });
+      // Live register state — updated by lamp events (20 Hz) and entity state (5 s)
+      this._livePC  = 0;
+      this._livePSW = 0;
+      // Promise returned by hass.connection.subscribeEvents(); null until subscribed
+      this._lampSub = null;
+      // requestAnimationFrame ID for pending LED repaint; null when idle
+      this._rafId   = null;
     }
 
     PiDP11PanelCard.prototype = Object.create(HTMLElement.prototype);
@@ -236,9 +249,43 @@
 
     PiDP11PanelCard.prototype.getCardSize = function () { return 3; };
 
+    PiDP11PanelCard.prototype.disconnectedCallback = function () {
+      // Unsubscribe from lamp events when the card is removed from the DOM
+      if (this._lampSub) {
+        Promise.resolve(this._lampSub).then(function (unsub) {
+          try { unsub && unsub(); } catch (e) {}
+        });
+        this._lampSub = null;
+      }
+      if (this._rafId) {
+        cancelAnimationFrame(this._rafId);
+        this._rafId = null;
+      }
+    };
+
     Object.defineProperty(PiDP11PanelCard.prototype, "hass", {
       set: function (hass) {
         this._hass = hass;
+
+        // Subscribe to pidp11_lamps events exactly once per card instance.
+        // The event is fired by coordinator._handle_lamp_line at 20 Hz when
+        // the lamp watch task (port 2226) is connected.
+        if (!this._lampSub) {
+          var self = this;
+          this._lampSub = hass.connection.subscribeEvents(
+            function (ev) { self._onLamp(ev); },
+            "pidp11_lamps"
+          );
+        }
+
+        // Seed live register state from entity state.
+        // This gives correct initial values before any lamp events arrive
+        // and acts as a 5 s fallback if the lamp stream is unavailable.
+        var pcOct  = this._st(this._cfg.pc_entity);
+        var pswOct = this._st(this._cfg.psw_entity);
+        if (pcOct  !== null) this._livePC  = octalToInt(pcOct);
+        if (pswOct !== null) this._livePSW = octalToInt(pswOct);
+
         this._update();
       },
     });
@@ -249,6 +296,52 @@
         : null;
     };
 
+    // Fast path: called by RAF after a lamp event updates _livePC/_livePSW.
+    // Updates only the LED class names and value text — does not rebuild innerHTML.
+    PiDP11PanelCard.prototype._updateLeds = function () {
+      var root = this.shadowRoot;
+      if (!root) return;
+
+      var adrLeds = root.querySelectorAll(".adr");
+      var datLeds = root.querySelectorAll(".dat");
+      var pcBits  = intToBits(this._livePC,  16);
+      var pswBits = intToBits(this._livePSW, 16);
+
+      for (var i = 0; i < adrLeds.length; i++) {
+        adrLeds[i].className = "led adr " + (pcBits[i] ? "on" : "off");
+      }
+      for (var j = 0; j < datLeds.length; j++) {
+        datLeds[j].className = "led dat " + (pswBits[j] ? "on" : "off");
+      }
+
+      // Update the octal value displays alongside the LEDs
+      var pcEl  = root.querySelector(".rv-pc");
+      var psEl  = root.querySelector(".rv-ps");
+      if (pcEl)  pcEl.textContent  = this._livePC.toString(8).replace(/^0+/, "")  || "0";
+      if (psEl)  psEl.textContent  = this._livePSW.toString(8).replace(/^0+/, "") || "0";
+    };
+
+    // Lamp event handler — fires on pidp11_lamps HA events at up to 20 Hz.
+    PiDP11PanelCard.prototype._onLamp = function (ev) {
+      var d = ev.data;
+      if (!d) return;
+      var pc  = (d.address !== undefined) ? parseInt(d.address, 8) : this._livePC;
+      var ps  = (d.data    !== undefined) ? parseInt(d.data,    8) : this._livePSW;
+      if (pc === this._livePC && ps === this._livePSW) return;
+      this._livePC  = pc;
+      this._livePSW = ps;
+      // Coalesce rapid events: only schedule one RAF at a time
+      if (this._rafId) return;
+      var self = this;
+      this._rafId = requestAnimationFrame(function () {
+        self._rafId = null;
+        self._updateLeds();
+      });
+    };
+
+    // Slow path: full innerHTML rebuild on every hass update (5 s cadence).
+    // Uses _livePC/_livePSW (updated by lamp events) for LED state so the
+    // full render is always consistent with the live animation state.
     PiDP11PanelCard.prototype._update = function () {
       if (!this._cfg || !this._hass) return;
 
@@ -263,14 +356,14 @@
       var lampCls = offline ? "offline" : running ? "running" : "halted";
       var lampTxt = offline ? "OFFLN" : running ? "RUN" : "HALT";
 
-      var pcBits  = intToBits(octalToInt(pcOct),  16);
-      var pswBits = intToBits(octalToInt(pswOct), 16);
+      var pcBits  = intToBits(this._livePC,  16);
+      var pswBits = intToBits(this._livePSW, 16);
 
-      // Pad octal to 6 digits (max 16-bit octal is 177777)
-      var pcDisp  = pcOct  ? pcOct.replace(/^0+/, "") || "0" : "——————";
+      // Display text: show entity value when available, em-dashes when offline
+      var pcDisp  = pcOct  ? pcOct.replace(/^0+/, "")  || "0" : "——————";
       var pswDisp = pswOct ? pswOct.replace(/^0+/, "") || "0" : "——————";
 
-      // 16 LEDs in four groups of 4 (one group per octal pair)
+      // 16 LEDs in four groups of 4
       var G = [4, 4, 4, 4];
 
       this.shadowRoot.innerHTML =
@@ -291,17 +384,17 @@
             '<div class="regrow">' +
               '<div class="rowhead">' +
                 '<span class="rlabel">Address Register (PC)</span>' +
-                '<span class="rval">' + pcDisp + "</span>" +
+                '<span class="rval rv-pc">' + pcDisp + "</span>" +
               "</div>" +
-              ledRow(pcBits, G) +
+              ledRow(pcBits, G, "adr") +
             "</div>" +
 
             '<div class="regrow">' +
               '<div class="rowhead">' +
                 '<span class="rlabel">Data Register (PSW)</span>' +
-                '<span class="rval">' + pswDisp + "</span>" +
+                '<span class="rval rv-ps">' + pswDisp + "</span>" +
               "</div>" +
-              ledRow(pswBits, G) +
+              ledRow(pswBits, G, "dat") +
             "</div>" +
           "</div>" +
 
@@ -344,7 +437,8 @@
     name: "PiDP-11 Front Panel",
     description:
       "Amber blinkenlight display for the PDP-11/70 emulator — " +
-      "live address LEDs (PC), data LEDs (PSW), run/halt lamp, and current OS.",
+      "live address LEDs (PC), data LEDs (PSW), run/halt lamp, and current OS. " +
+      "Animates at 20 Hz when the lamp stream is connected.",
     preview: true,
     documentationURL: "https://github.com/dmz006/pidp11-hacs",
   });

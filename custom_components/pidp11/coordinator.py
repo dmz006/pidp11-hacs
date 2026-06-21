@@ -19,8 +19,10 @@ from .const import (
     CPU_STATE_RUNNING,
     CURRENT_SYSTEM_PATH,
     DOMAIN,
+    EVENT_LAMPS,
     EVENT_SR_CHANGED,
     EVENT_SWITCH_CHANGED,
+    LAMP_PORT_OFFSET,
     UPDATE_INTERVAL_SECONDS,
     WATCH_PORT_OFFSET,
 )
@@ -71,6 +73,8 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
         self._prev_sr: str | None = None
         self._watch_port = port + WATCH_PORT_OFFSET
         self._watch_task: asyncio.Task[None] | None = None
+        self._lamp_port = port + LAMP_PORT_OFFSET
+        self._lamp_task: asyncio.Task[None] | None = None
 
     # ── Public command API ────────────────────────────────────────────────────
 
@@ -228,6 +232,72 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
         if self._watch_task:
             self._watch_task.cancel()
             self._watch_task = None
+
+    # ── Lamp stream ───────────────────────────────────────────────────────────
+
+    def start_lamp_watch(self, task_name: str) -> None:
+        """Start the long-lived lamp watch task (no-op if already running)."""
+        if self._lamp_task and not self._lamp_task.done():
+            return
+        self._lamp_task = self.hass.async_create_background_task(
+            self._run_lamp_watch(), name=task_name
+        )
+
+    def stop_lamp_watch(self) -> None:
+        """Cancel the lamp watch task."""
+        if self._lamp_task:
+            self._lamp_task.cancel()
+            self._lamp_task = None
+
+    async def _run_lamp_watch(self) -> None:
+        """Long-lived lamp stream connection. Reconnects on failure."""
+        while True:
+            try:
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(self.host, self._lamp_port),
+                    timeout=_CONNECT_TIMEOUT,
+                )
+                try:
+                    writer.write(f"AUTH {self._secret}\n".encode())
+                    await writer.drain()
+                    line = await asyncio.wait_for(reader.readline(), timeout=5.0)
+                    if not line.startswith(b"OK"):
+                        _LOGGER.debug(
+                            "Lamp watch: auth failed on port %s", self._lamp_port
+                        )
+                        await asyncio.sleep(30.0)
+                        continue
+                    _LOGGER.debug("Lamp watch connected on port %s", self._lamp_port)
+                    while True:
+                        line = await asyncio.wait_for(reader.readline(), timeout=60.0)
+                        if not line:
+                            break
+                        self._handle_lamp_line(line.decode(errors="replace").strip())
+                finally:
+                    try:
+                        writer.close()
+                        await writer.wait_closed()
+                    except Exception:
+                        pass
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:
+                _LOGGER.debug(
+                    "Lamp watch disconnected: %s — retrying in 10 s", exc
+                )
+            await asyncio.sleep(10.0)
+
+    def _handle_lamp_line(self, msg: str) -> None:
+        """Fire pidp11_lamps event for each EVENT lamps line from the stream."""
+        if not msg.startswith("EVENT lamps "):
+            return
+        m = re.match(r"EVENT lamps ADDRESS=([0-7]+) DATA=([0-7]+)", msg)
+        if not m:
+            return
+        self.hass.bus.async_fire(
+            EVENT_LAMPS,
+            {"address": m.group(1), "data": m.group(2)},
+        )
 
     async def _run_sr_watch(self) -> None:
         """Long-lived watch stream connection. Reconnects on failure."""
