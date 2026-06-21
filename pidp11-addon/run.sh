@@ -45,10 +45,14 @@ ENABLE_GPIO="${ENABLE_GPIO:-$(cat "${_S6E}/ENABLE_GPIO"             2>/dev/null 
 SSH_PASSWORD="${SSH_PASSWORD:-$(cat "${_S6E}/SSH_PASSWORD"          2>/dev/null || true)}"
 SSH_PASSWORD_DISABLED="${SSH_PASSWORD_DISABLED:-$(cat "${_S6E}/SSH_PASSWORD_DISABLED" 2>/dev/null || true)}"
 SSH_AUTHORIZED_KEYS="${SSH_AUTHORIZED_KEYS:-$(cat "${_S6E}/SSH_AUTHORIZED_KEYS"       2>/dev/null || true)}"
+SSH_PORT="${SSH_PORT:-$(cat "${_S6E}/SSH_PORT"                                        2>/dev/null || true)}"
 # Final hardcoded defaults
 DEFAULT_BOOT="${DEFAULT_BOOT:-idled}"
 ENABLE_GPIO="${ENABLE_GPIO:-false}"
 SSH_PASSWORD_DISABLED="${SSH_PASSWORD_DISABLED:-false}"
+# SSH_PORT default: 22 works in HAOS (Supervisor does the 2211→22 mapping).
+# Standalone users with --network host should set SSH_PORT=2211.
+SSH_PORT="${SSH_PORT:-22}"
 
 log "Default boot: ${DEFAULT_BOOT} | GPIO: ${ENABLE_GPIO}"
 
@@ -129,9 +133,13 @@ _setup_ssh() {
         log "SSH: WARNING — no credentials configured; SSH console will reject all logins"
     fi
 
-    log "Starting SSH server (port 22 → 2211)"
+    # SSH_PORT: default 22 works in HAOS (Supervisor maps 2211→22).
+    # Standalone --network host: set SSH_PORT=2211 so dropbear doesn't
+    # collide with the host's own openssh on port 22.
+    _ssh_port="${SSH_PORT:-22}"
+    log "Starting SSH server (port ${_ssh_port})"
     # shellcheck disable=SC2086
-    dropbear -F -E -p 22 \
+    dropbear -F -E -p "${_ssh_port}" \
         -r /data/ssh/dropbear_rsa_host_key \
         -r /data/ssh/dropbear_ed25519_host_key \
         -w ${db_extra} &

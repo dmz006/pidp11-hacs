@@ -115,6 +115,7 @@ docker run -d \
   -v pidp11-data:/data \
   -e ENABLE_GPIO=true \
   -e SSH_PASSWORD=pdp11 \
+  -e SSH_PORT=2211 \
   ghcr.io/dmz006/pidp11-addon:latest
 ```
 
@@ -131,6 +132,7 @@ What each flag does:
 | `pidp11-data` | Named volume for state, SSH host keys, and the auth-shim secret |
 | `ENABLE_GPIO=true` | Starts `pidp1170_blinkenlightd` and `scansw` for physical lamps |
 | `SSH_PASSWORD` | Sets the `pdp11` user's SSH password for console access |
+| `SSH_PORT=2211` | Dropbear listens on 2211 — avoids colliding with the Pi's own openssh on port 22 |
 | `--restart unless-stopped` | Survives reboot; stays down after manual `docker stop` |
 
 The image is built for **linux/arm64** only. It will not run on x86.
@@ -141,14 +143,14 @@ The image is built for **linux/arm64** only. It will not run on x86.
 docker run -d \
   --name pidp11 \
   --restart unless-stopped \
+  -p 2211:22 \
   -v /opt/pidp11-share:/share \
   -v pidp11-data:/data \
   -e SSH_PASSWORD=pdp11 \
   ghcr.io/dmz006/pidp11-addon:latest
 ```
 
-Omit `--privileged`, `--network host`, and the rpcbind socket. SimH boots
-and you can SSH in; the lamps just won't be driven.
+No `--network host` needed without GPIO. Use `-p 2211:22` for port mapping instead — dropbear stays on its default port 22 inside the container, the host exposes it on 2211.
 
 ---
 

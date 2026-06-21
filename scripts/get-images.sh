@@ -166,5 +166,6 @@ echo "    -v ${SHARE_DIR}:/share \\"
 echo "    -v pidp11-data:/data \\"
 echo "    -e ENABLE_GPIO=true \\"
 echo "    -e SSH_PASSWORD=pdp11 \\"
+echo "    -e SSH_PORT=2211 \\"
 echo "    ghcr.io/dmz006/pidp11-addon:latest"
 echo
