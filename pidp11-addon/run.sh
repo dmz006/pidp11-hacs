@@ -158,6 +158,20 @@ SHIM_PID=$!
 
 _setup_ssh
 
+# ── GPIO: wait for /dev/mem before touching GPIO hardware ────────────────────
+# HAOS may not expose /dev/mem immediately on container start; bounded retry.
+if [[ "${ENABLE_GPIO}" == "true" ]]; then
+    _devmem_retries=10
+    until [[ -e /dev/mem ]] || (( --_devmem_retries == 0 )); do
+        log "Waiting for /dev/mem... (${_devmem_retries} retries left)"
+        sleep 0.5
+    done
+    if [[ ! -e /dev/mem ]]; then
+        log "WARNING: /dev/mem not available after 5 s — disabling GPIO"
+        ENABLE_GPIO="false"
+    fi
+fi
+
 # ── Main boot loop ────────────────────────────────────────────────────────────
 # Mirrors upstream pidp11.sh:
 #   1. Read SR switches (or use default_boot when GPIO disabled)
@@ -208,8 +222,28 @@ while true; do
     esac
 
     log "Booting: ${SEL}"
-    printf 'cd %s\ndo boot.ini\n' "${SYSTEMS_DIR}/${SEL}" > "${SHM_DIR}/tmpsimhcommand.txt"
     echo "${SEL}" > /share/pidp11/current_system
+
+    # ── Generate SimH command file ────────────────────────────────────────────
+    # When GPIO is enabled, uncomment 'set realcons' lines at runtime so the
+    # same boot.ini files work in both GPIO and container-only modes.
+    if [[ "${ENABLE_GPIO}" == "true" ]]; then
+        _ini="${SHM_DIR}/gpio_boot.ini"
+        if [[ "${SEL}" == "blinky" ]]; then
+            # blinky delegates to PDP-11xx.ini — patch that file too
+            _pdp11="${SHM_DIR}/gpio_PDP-11xx.ini"
+            sed 's/^;set  realcons/set  realcons/;s/^;set realcons test/set realcons test/' \
+                "${SYSTEMS_DIR}/blinky/PDP-11xx.ini" > "${_pdp11}"
+            # Redirect blinky's boot.ini to use our patched PDP-11xx.ini
+            sed "s|do PDP-11xx.ini|do ${_pdp11}|" \
+                "${SYSTEMS_DIR}/blinky/boot.ini" > "${_ini}"
+        else
+            sed 's/^;set realcons/set realcons/' "${SYSTEMS_DIR}/${SEL}/boot.ini" > "${_ini}"
+        fi
+        printf 'cd %s\ndo %s\n' "${SYSTEMS_DIR}/${SEL}" "${_ini}" > "${SHM_DIR}/tmpsimhcommand.txt"
+    else
+        printf 'cd %s\ndo boot.ini\n' "${SYSTEMS_DIR}/${SEL}" > "${SHM_DIR}/tmpsimhcommand.txt"
+    fi
 
     # ── GPIO S4: start rpcbind + Blinkenlight server ──────────────────────────
     if [[ "${ENABLE_GPIO}" == "true" ]]; then
