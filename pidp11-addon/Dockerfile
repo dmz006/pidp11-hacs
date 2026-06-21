@@ -57,6 +57,7 @@ RUN apt-get update \
         libpcap0.8 \
         libreadline8 \
         libtirpc3 \
+        bsdmainutils \
         rpcbind \
         screen \
         python3 \

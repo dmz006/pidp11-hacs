@@ -19,15 +19,26 @@ log() { echo "[pidp11] $*"; }
 die() { echo "[pidp11] FATAL: $*" >&2; exit 1; }
 
 # ── Read add-on options ───────────────────────────────────────────────────────
+# Priority: bashio (HA Supervisor → /data/options.json)
+#         > docker -e env vars (s6 stores them in S6_ENV but strips them from CMD)
+#         > hardcoded defaults
+_S6E=/var/run/s6/container_environment
+
 if [ -f /usr/lib/bashio/bashio.sh ]; then
     # shellcheck source=/dev/null
     source /usr/lib/bashio/bashio.sh
-    DEFAULT_BOOT=$(bashio::config 'default_boot')
-    ENABLE_GPIO=$(bashio::config 'enable_gpio')
-else
-    DEFAULT_BOOT="${DEFAULT_BOOT:-211bsd}"
-    ENABLE_GPIO="${ENABLE_GPIO:-false}"
+    # Returns empty string when Supervisor API is unreachable (direct docker-run)
+    _boot=$(bashio::config 'default_boot' 2>/dev/null || true)
+    _gpio=$(bashio::config 'enable_gpio'  2>/dev/null || true)
+    [[ -n "${_boot}" ]] && DEFAULT_BOOT="${_boot}"
+    [[ -n "${_gpio}" ]] && ENABLE_GPIO="${_gpio}"
 fi
+# s6-overlay strips -e env vars from the CMD process; read them from the env dir
+DEFAULT_BOOT="${DEFAULT_BOOT:-$(cat "${_S6E}/DEFAULT_BOOT" 2>/dev/null || true)}"
+ENABLE_GPIO="${ENABLE_GPIO:-$(cat "${_S6E}/ENABLE_GPIO"   2>/dev/null || true)}"
+# Final hardcoded defaults
+DEFAULT_BOOT="${DEFAULT_BOOT:-211bsd}"
+ENABLE_GPIO="${ENABLE_GPIO:-false}"
 
 log "Default boot: ${DEFAULT_BOOT} | GPIO: ${ENABLE_GPIO}"
 

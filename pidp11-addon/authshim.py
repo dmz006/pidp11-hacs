@@ -63,7 +63,7 @@ async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) ->
         try:
             simh_r, simh_w = await asyncio.open_connection("127.0.0.1", SIMH_PORT)
         except ConnectionRefusedError:
-            writer.write(b"# SimH remote console not available yet — is SimH running?\n")
+            writer.write(b"# SimH remote console not available yet -- is SimH running?\n")
             await writer.drain()
             return
 
