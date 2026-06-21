@@ -28,8 +28,9 @@ is available for testing.
    `PDP-11xx.ini` separately, redirects `boot.ini` → patched copy). Boot.ini
    source files remain unchanged so container-only operation still works.
 4b. ⏳ **Boot-select encoder.** SR switch reading is wired (`scansw` → `getsel.sh`)
-   but `sensor.pidp11_boot_select` HA entity and R10 trigger-boot-on-switch-move
-   deferred until physical hardware test confirms behavior.
+   but `scansw` binary is 32-bit ARM (armhf), which fails on the aarch64 container and
+   Pi 5 host; also uses BCM2835 GPIO which doesn't exist on Pi 5. Needs rewrite or
+   Pi 5-compatible replacement. `sensor.pidp11_boot_select` HA entity deferred.
 5. ⏳ **CI image build.** Build `linux/arm64` image, push to
    `ghcr.io/<owner>/pidp11-addon-aarch64:X.Y.Z` on tag. Deferred to v1.0.0 release.
 6. ⏳ **Hardware checklist.** Every v1 feature has a checklist entry in
@@ -43,8 +44,8 @@ is available for testing.
 - ✅ `tests/addon/test_startup_ordering.py::test_blinkenlightd_starts_before_simh` — xfail stub
 - [ ] Hardware checklist entries (see `tests/hardware/MANUAL-CHECKLIST.md`):
   - [x] Lamps animate (idled pattern confirmed on physical hat — Jun 21 2026)
-  - [ ] Lamps animate while 2.11BSD boots
-  - [ ] SR register read via `pidp11.examine` matches physical switches
+  - [x] Lamps animate while 2.11BSD boots (lamp activity confirmed Jun 21 2026)
+  - [ ] SR register read via `pidp11.examine` matches physical switches (SimH returns 001403 — awaiting user physical confirmation)
   - [ ] START/HALT switches change `sensor.pidp11_state` within 1 s
   - [ ] Boot-select encoder changes `sensor.pidp11_boot_select`
   - [ ] Cold-boot HAOS → emulator up and hat responsive in < 60 s
