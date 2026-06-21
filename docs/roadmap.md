@@ -4,23 +4,41 @@ v1 scope is "PiDP-11 on HAOS works exactly like on Pi OS, plus basic
 HA observability." Everything else is here. Items are R-numbered so we
 can reference them in commits and issues.
 
-## v1 (targets: sprints S0–S4)
+---
 
-- **R0** Container add-on boots, SSH lands in `screen`, lamps+switches
-  work on Pi 5 hardware.
-- **R1** HACS integration exposes `sensor.pidp11_state`,
+## ~~v1 (targets: sprints S0–S4)~~ ✅ shipped as v1.1.0
+
+- ~~**R0** Container add-on boots, SSH lands in `screen`, lamps+switches
+  work on Pi 5 hardware.~~
+  > Shipped. Docker image at `ghcr.io/dmz006/pidp11-addon:latest`. GPIO via RP1
+  > on Pi 5. aarch64 scansw fix submitted upstream (PR #19).
+
+- ~~**R1** HACS integration exposes `sensor.pidp11_state`,
   `sensor.pidp11_pc`, `switch.pidp11_power`, services `pidp11.boot`
-  / `pidp11.halt`.
-- **R2** Multi-arch build, auto-updates via HACS + add-on store.
+  / `pidp11.halt`.~~
+  > Shipped. Coordinator, config flow, sensor/switch entities, HALT/CONT/BOOT/DEPOSIT/EXAMINE services.
 
-## v1.1 — Lovelace front panel dashboard (sprint S5)
+- ~~**R2** Multi-arch build, auto-updates via HACS + add-on store.~~
+  > Shipped. CI builds linux/arm64, pushes to GHCR on every main push (latest) and
+  > version tags (semver). HACS manifest and hacs.json in place.
 
-A Lovelace custom card that looks like the PiDP-11 face: address LEDs,
+---
+
+## ~~v1.1 — Lovelace front panel dashboard (sprint S5)~~ ✅ shipped as v1.1.0
+
+~~A Lovelace custom card that looks like the PiDP-11 face: address LEDs,
 data LEDs, run/halt lamp, boot-select rotary, the full switch row. Live
 sync with the emulator — the on-screen panel and the physical panel
 mirror each other. Ships as `lovelace/pidp11-panel-card.js` and is
 referenced from the integration's HACS Lovelace category. Priority
-per user ask. See `docs/sprints/S5-lamps-switches-dashboard.md`.
+per user ask. See `docs/sprints/S5-lamps-switches-dashboard.md`.~~
+
+> Shipped (register snapshot, not live lamps). `lovelace/pidp11-panel-card.js` —
+> amber ADDRESS/DATA LEDs, RUN lamp, polls coordinator at 5 s. Auto-registers on
+> integration install. Live 60 Hz animation deferred to v1.2 (needs blinkenlightd
+> push channel).
+
+---
 
 ## v1.2 — Switch events in HA
 
@@ -31,6 +49,9 @@ Every physical switch throw fires an HA event
 push-notification channel from the pidp11 GPIO driver to the remote
 console — needs an upstream PR or a sidecar reader of the driver's
 shared memory. Spike in S5.
+
+Also includes live Lovelace lamp animation (60 Hz via blinkenlightd push channel)
+deferred from v1.1.
 
 ## v1.3 — Richer register sensors
 
@@ -68,10 +89,10 @@ targets the remote Pi over the network; no local add-on. Requires
 solving auth + latency for the remote-console protocol. Not in v1
 because the user confirmed the single-Pi target.
 
-## Priority order (per user)
+## Priority order
 
-1. v1.1 Lovelace panel dashboard (highest — user called this out).
-2. v1.2 Switch events in HA.
+1. ~~v1.1 Lovelace panel dashboard~~ ✅ done
+2. v1.2 Switch events in HA + live lamps.
 3. v1.3 Register sensors.
 4. v1.4 Tape/state services.
 5. v2+ later.
