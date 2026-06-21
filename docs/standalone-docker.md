@@ -55,7 +55,54 @@ PiDP-11 hat will not light up.
 
 ---
 
-## 3 — Pull and run
+## 3 — Create the share directory
+
+The container reads disk images from a directory on the host, mounted into the
+container at `/share`. Use a fixed absolute path — **not `$HOME`** — so it
+doesn't change depending on whether you run Docker as your user or with `sudo`:
+
+```bash
+sudo mkdir -p /opt/pidp11-share/pidp11/disks
+sudo chown pi:pi /opt/pidp11-share     # or: sudo chown $(whoami) /opt/pidp11-share
+```
+
+This path (`/opt/pidp11-share`) is what the run command and image downloader
+below both use. Change it consistently if you prefer somewhere else.
+
+---
+
+## 4 — Download disk images
+
+Most systems ship bundled in the Docker image. A few large disk images need to
+be staged in the share directory first (rsx11mp, unix7, sysiii, sysv). Run the
+downloader from the repo — it fetches Oscar's systems archive and lets you
+opt into 2.11BSD and the Bilquist RSX-11M+:
+
+```bash
+# From a clone of this repo on the Pi:
+git clone https://github.com/dmz006/pidp11-hacs.git /tmp/pidp11-hacs
+bash /tmp/pidp11-hacs/scripts/get-images.sh /opt/pidp11-share
+```
+
+Or if you already have a native pidp11 install (`/opt/pidp11/systems/`), copy
+from there instead:
+
+```bash
+for sys in rsx11mp unix7 sysiii sysv; do
+  sudo mkdir -p /opt/pidp11-share/pidp11/disks/${sys}
+  sudo cp /opt/pidp11/systems/${sys}/*.dsk \
+          /opt/pidp11/systems/${sys}/*.hp \
+          /opt/pidp11-share/pidp11/disks/${sys}/ 2>/dev/null || true
+done
+sudo chown -R pi:pi /opt/pidp11-share
+```
+
+**What's bundled (no staging needed):** idled, blinky, dos11, rsts7, rt11,
+unix1, unix5, unix6. 2.11BSD is auto-downloaded on first container boot (~250 MB).
+
+---
+
+## 5 — Pull and run
 
 ```bash
 docker run -d \
@@ -64,15 +111,14 @@ docker run -d \
   --privileged \
   --network host \
   -v /run/rpcbind.sock:/run/rpcbind.sock \
-  -v "$HOME/.pidp11/share:/share" \
+  -v /opt/pidp11-share:/share \
   -v pidp11-data:/data \
   -e ENABLE_GPIO=true \
   -e SSH_PASSWORD=pdp11 \
   ghcr.io/dmz006/pidp11-addon:latest
 ```
 
-Replace `pdp11` with a real password — this is what you type to SSH into
-the console.
+Replace `pdp11` with a real password.
 
 What each flag does:
 
@@ -81,21 +127,21 @@ What each flag does:
 | `--privileged` | Required for `/dev/gpiomem*` access (RP1 GPIO) |
 | `--network host` | Lets ONC RPC bind to the standard portmapper port |
 | `/run/rpcbind.sock` | Shares the host rpcbind socket so the GPIO driver can register |
-| `$HOME/.pidp11/share:/share` | Persistent share dir for disk images (survives container updates) |
+| `/opt/pidp11-share:/share` | Disk images and persistent share (survives container updates) |
 | `pidp11-data` | Named volume for state, SSH host keys, and the auth-shim secret |
-| `ENABLE_GPIO=true` | Tell the container to start `pidp1170_blinkenlightd` and `scansw` |
+| `ENABLE_GPIO=true` | Starts `pidp1170_blinkenlightd` and `scansw` for physical lamps |
 | `SSH_PASSWORD` | Sets the `pdp11` user's SSH password for console access |
-| `--restart unless-stopped` | Container comes back after a reboot; stays down if you `docker stop` it |
+| `--restart unless-stopped` | Survives reboot; stays down after manual `docker stop` |
 
 The image is built for **linux/arm64** only. It will not run on x86.
 
-**Without the hat** (emulator only, no GPIO):
+**Without the hat** (emulator only, no GPIO lamps):
 
 ```bash
 docker run -d \
   --name pidp11 \
   --restart unless-stopped \
-  -v "$HOME/.pidp11/share:/share" \
+  -v /opt/pidp11-share:/share \
   -v pidp11-data:/data \
   -e SSH_PASSWORD=pdp11 \
   ghcr.io/dmz006/pidp11-addon:latest
@@ -211,12 +257,12 @@ These systems ship with disk images inside the container — no staging needed:
 
 ### Disk images that need to be staged
 
-These systems need disk images placed in `~/.pidp11/share/pidp11/disks/<system>/`
+These systems need disk images placed in `/opt/pidp11-share/pidp11/disks/<system>/`
 on the host (which maps to `/share/pidp11/disks/<system>/` inside the container):
 
 | System | OS | Filename needed | Where to get it |
 |--------|----|-----------------|-----------------|
-| `rsx11mp` | RSX-11M+ | `rsx11mp/PiDP11_DU0.dsk` | Oscar's distribution or run the upstream `install.sh` |
+| `rsx11mp` | RSX-11M+ | `rsx11mp/PiDP11_DU0.dsk` | Oscar's distribution or `scripts/get-images.sh` |
 | `rsx11bq` | RSX-11M+ (Bilquist) | `rsx11bq/pidp.dsk` | Same |
 | `unix7` | Unix V7 | `unix7/disk0.hp` | Upstream distribution |
 | `sysiii` | Unix System III | `sysiii/disk.hp` | Upstream distribution |
@@ -228,33 +274,31 @@ No crash, no data loss.
 ### Getting disk images from the upstream native install
 
 If you previously ran the native pidp11 installer on your Pi, the disk images
-are at `/opt/pidp11/systems/<system>/`. Copy them to the share directory:
+are at `/opt/pidp11/systems/<system>/`. Hard-link them into the share directory
+(no extra disk space used, since they're on the same filesystem):
 
 ```bash
-# Run these on the Pi (outside the container)
-mkdir -p ~/.pidp11/share/pidp11/disks/rsx11mp
-sudo cp /opt/pidp11/systems/rsx11mp/*.dsk ~/.pidp11/share/pidp11/disks/rsx11mp/
-# repeat for other systems you want
+sudo mkdir -p /opt/pidp11-share/pidp11/disks
+for sys in rsx11mp rsx11bq unix7 sysiii sysv 211bsd; do
+  [ -d /opt/pidp11/systems/$sys ] || continue
+  sudo mkdir -p /opt/pidp11-share/pidp11/disks/$sys
+  find /opt/pidp11/systems/$sys -maxdepth 1 -type f \
+    \( -name '*.dsk' -o -name '*.hp' -o -name '*.tap' -o -name '*.rk' \) -print0 \
+    | xargs -0 -I{} sudo ln '{}' /opt/pidp11-share/pidp11/disks/$sys/
+done
 ```
 
-If you're on a fresh Pi with no native install, run the upstream installer once
-just to get the disk images, then stop the native software and use the container:
-
-```bash
-cd /opt && sudo git clone https://github.com/obsolescence/pidp11.git
-/opt/pidp11/install/install.sh   # follow prompts, grab the disk images
-# disable native autostart
-echo "Hidden=true" >> ~/.config/autostart/pdp11startup.desktop
-# copy images to share dir, then use Docker
-```
+If you're on a fresh Pi with no native install, use `scripts/get-images.sh` (section 4 above) — it downloads Oscar's systems archive and the individual large images directly.
 
 ### Staging a new disk image
 
-Drop it into the right subdirectory on the **host**, then restart the container:
+Drop the image file into the right subdirectory on the host:
 
 ```bash
-mkdir -p ~/.pidp11/share/pidp11/disks/rsx11mp
-scp yourimage.dsk pi@<pi-ip>:~/.pidp11/share/pidp11/disks/rsx11mp/PiDP11_DU0.dsk
+# copy from local machine
+scp yourimage.dsk user@<pi-ip>:/opt/pidp11-share/pidp11/disks/rsx11mp/PiDP11_DU0.dsk
+# or copy from elsewhere on the Pi
+sudo cp /path/to/image.dsk /opt/pidp11-share/pidp11/disks/rsx11mp/PiDP11_DU0.dsk
 docker restart pidp11
 ```
 
@@ -299,7 +343,7 @@ docker stop pidp11 && docker rm pidp11
 # re-run the docker run command from step 3
 ```
 
-Your disk images live in `~/.pidp11/share` (bind mount) and your emulator
+Your disk images live in `/opt/pidp11-share` (bind mount) and your emulator
 state in the `pidp11-data` named volume — both survive this process.
 
 ---

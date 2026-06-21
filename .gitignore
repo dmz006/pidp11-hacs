@@ -36,6 +36,10 @@ Thumbs.db
 # Keep Claude-local memory store out of the repo
 .claude/
 
+# Session management files — contain local paths and per-user config; not for the repo
+CLAUDE.md
+AGENT.md
+
 # datawatch-managed (BL219)
 .aider.conf.yml
 .aider.chat.history.md
