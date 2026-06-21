@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# PiDP-11 add-on launcher — Sprint S1 (emulator MVP, no GPIO).
-# GPIO (server11 / scansw) wired up in S4.
+# PiDP-11 add-on launcher.
+# Mirrors the upstream pidp11.sh loop: after SimH exits, if the front-panel
+# triggered a reboot (tmpsimhcommand.txt == "exit"), re-read SR switches and
+# boot the newly selected system.  This is how switch-based OS switching works.
 set -euo pipefail
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 BIN_DIR="/opt/pidp11/bin"
 SYSTEMS_DIR="/opt/pidp11/systems"
-SHARE_DIR="/share/pidp11"
-DISKS_DIR="${SHARE_DIR}/disks"
+DISKS_DIR="/share/pidp11/disks"
 DATA_DIR="/data"
 SECRET_FILE="${DATA_DIR}/remote_console.secret"
 SHM_DIR="/dev/shm/pidp11"
 SIMH="${BIN_DIR}/pdp11_realcons"
+SERVER11="${BIN_DIR}/pidp1170_blinkenlightd"
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-log()  { echo "[pidp11] $*"; }
-die()  { echo "[pidp11] FATAL: $*" >&2; exit 1; }
+log() { echo "[pidp11] $*"; }
+die() { echo "[pidp11] FATAL: $*" >&2; exit 1; }
 
 # ── Read add-on options ───────────────────────────────────────────────────────
-# bashio is available in the HA base image; fall back to env/defaults otherwise.
 if [ -f /usr/lib/bashio/bashio.sh ]; then
     # shellcheck source=/dev/null
     source /usr/lib/bashio/bashio.sh
@@ -29,64 +29,47 @@ else
     ENABLE_GPIO="${ENABLE_GPIO:-false}"
 fi
 
-log "Default boot: ${DEFAULT_BOOT}"
-log "GPIO enabled: ${ENABLE_GPIO}"
+log "Default boot: ${DEFAULT_BOOT} | GPIO: ${ENABLE_GPIO}"
 
 # ── Initial setup ─────────────────────────────────────────────────────────────
 mkdir -p "${SHM_DIR}" "${DISKS_DIR}"
 
-# Generate remote-console shared secret on first start.
 if [[ ! -f "${SECRET_FILE}" ]]; then
     python3 -c "import secrets; print(secrets.token_hex(32))" > "${SECRET_FILE}"
     chmod 600 "${SECRET_FILE}"
-    log "Generated remote console secret (${SECRET_FILE})"
+    log "Generated remote console secret"
 fi
 
-# SDL2 is linked into the binary but we never open a display.
+# SDL stubs — binary links against SDL2 but we never open a display
 export SDL_VIDEODRIVER=offscreen
 export SDL_AUDIODRIVER=dummy
 
-# ── 211bsd disk image ─────────────────────────────────────────────────────────
-BSD_DSK="${DISKS_DIR}/211bsd/2.11BSD_rq.dsk"
-if [[ "${DEFAULT_BOOT}" == "211bsd" ]] && [[ ! -f "${BSD_DSK}" ]]; then
-    log "211bsd disk image not found — downloading Chase Covello's 2.11BSD (~250 MB compressed)..."
+# ── Disk image helpers ────────────────────────────────────────────────────────
+_ensure_211bsd() {
+    local dsk="${DISKS_DIR}/211bsd/2.11BSD_rq.dsk"
+    [[ -f "${dsk}" ]] && return 0
+    log "211bsd disk image not found — downloading Chase Covello's 2.11BSD (~250 MB compressed)"
     mkdir -p "${DISKS_DIR}/211bsd"
     curl -fL --progress-bar \
-        -o "${DISKS_DIR}/211bsd/2.11BSD_rq.dsk.xz" \
+        -o "${dsk}.xz" \
         "https://github.com/chasecovello/211bsd-pidp11/raw/refs/heads/master/2.11BSD_rq.dsk.xz"
-    log "Decompressing disk image..."
-    unxz "${DISKS_DIR}/211bsd/2.11BSD_rq.dsk.xz"
-    log "211bsd ready at ${BSD_DSK}"
-fi
+    log "Decompressing..."
+    unxz "${dsk}.xz"
+    log "211bsd ready at ${dsk}"
+}
 
-# ── Boot selection ────────────────────────────────────────────────────────────
-if [[ "${ENABLE_GPIO}" == "true" ]] && [[ -x "${BIN_DIR}/scansw" ]]; then
-    # S4: read SR switches to pick the boot system.
-    log "Reading SR switches..."
-    sw=$("${BIN_DIR}/scansw" 2>/dev/null || echo "0")
-    lo=$(( sw % 262144 ))
-    lo=$(printf "%04o" "${lo}")
-    SEL=$("${BIN_DIR}/getsel.sh" "${lo}" | sed 's/default/idled/')
-    log "SR switches → octal ${lo} → system: ${SEL}"
-else
-    SEL="${DEFAULT_BOOT}"
-fi
+_check_prestaged() {
+    local sys="$1" disk="$2"
+    if [[ ! -f "${disk}" ]]; then
+        log "WARNING: ${sys} requires disk pre-staged at ${disk}"
+        log "  Copy the disk image from your Pi's /opt/pidp11/systems/${sys}/ via SSH/SCP"
+        log "  then place it at the path above and restart the add-on."
+        return 1
+    fi
+    return 0
+}
 
-# Validate system directory exists.
-if [[ ! -d "${SYSTEMS_DIR}/${SEL}" ]]; then
-    log "WARNING: system '${SEL}' not found, falling back to idled"
-    SEL="idled"
-fi
-
-log "Booting: ${SEL}"
-
-# Write SimH startup command file.
-cat > "${SHM_DIR}/tmpsimhcommand.txt" <<EOF
-cd ${SYSTEMS_DIR}/${SEL}
-do boot.ini
-EOF
-
-# ── Auth shim ─────────────────────────────────────────────────────────────────
+# ── Auth shim — start once, persists across reboots ──────────────────────────
 log "Starting auth shim (:2223 → SimH :2224)"
 SECRET_FILE="${SECRET_FILE}" python3 "${BIN_DIR}/authshim.py" &
 SHIM_PID=$!
@@ -94,18 +77,99 @@ SHIM_PID=$!
 cleanup() {
     log "Shutting down..."
     kill "${SHIM_PID}" 2>/dev/null || true
+    pkill -x pidp1170_blinkenlightd 2>/dev/null || true
+    pkill rpcbind 2>/dev/null || true
     screen -S pidp11 -X quit 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
-# ── SimH in screen ────────────────────────────────────────────────────────────
-# Screen session named 'pidp11' so SSH users can attach with: screen -x pidp11
-log "Launching SimH in screen session 'pidp11'"
-screen -dmS pidp11 "${SIMH}" "${SHM_DIR}/tmpsimhcommand.txt"
+# ── Main boot loop ────────────────────────────────────────────────────────────
+# Mirrors upstream pidp11.sh:
+#   1. Read SR switches (or use default_boot when GPIO disabled)
+#   2. Write SimH command file and launch SimH
+#   3. Wait for SimH to exit
+#   4. If tmpsimhcommand.txt == "exit" the front panel requested a reboot
+#      (user turned SR switches + depressed address rotary) → loop and re-read
+#   5. Otherwise SimH exited cleanly → stop container
+while true; do
 
-# Keep container alive while the screen session lives.
-while screen -list pidp11 2>/dev/null | grep -q '\.pidp11'; do
-    sleep 5
+    # ── Select boot system ────────────────────────────────────────────────────
+    if [[ "${ENABLE_GPIO}" == "true" ]] && [[ -x "${BIN_DIR}/scansw" ]]; then
+        log "Reading SR switches..."
+        sw=$("${BIN_DIR}/scansw" 2>/dev/null || echo "0")
+        lo=$(( sw % 262144 ))
+        lo=$(printf "%04o" "${lo}")
+        SEL=$("${BIN_DIR}/getsel.sh" "${lo}" | sed 's/default/idled/')
+        log "SR switches → octal ${lo} → system: ${SEL}"
+    else
+        SEL="${DEFAULT_BOOT}"
+    fi
+
+    if [[ ! -d "${SYSTEMS_DIR}/${SEL}" ]]; then
+        log "WARNING: system '${SEL}' not found — falling back to idled"
+        SEL="idled"
+    fi
+
+    # ── Per-system disk checks ────────────────────────────────────────────────
+    case "${SEL}" in
+        211bsd)
+            _ensure_211bsd || { SEL="idled"; log "Falling back to idled"; }
+            ;;
+        unix7)
+            _check_prestaged unix7 "${DISKS_DIR}/unix7/disk0.hp" || SEL="idled"
+            ;;
+        sysiii)
+            _check_prestaged sysiii "${DISKS_DIR}/sysiii/disk.hp" || SEL="idled"
+            ;;
+        sysv)
+            _check_prestaged sysv "${DISKS_DIR}/sysv/disk.hp" || SEL="idled"
+            ;;
+        rsx11mp)
+            _check_prestaged rsx11mp "${DISKS_DIR}/rsx11mp/PiDP11_DU0.dsk" || SEL="idled"
+            ;;
+        rsx11bq)
+            _check_prestaged rsx11bq "${DISKS_DIR}/rsx11bq/pidp.dsk" || SEL="idled"
+            ;;
+    esac
+
+    log "Booting: ${SEL}"
+    printf 'cd %s\ndo boot.ini\n' "${SYSTEMS_DIR}/${SEL}" > "${SHM_DIR}/tmpsimhcommand.txt"
+
+    # ── GPIO S4: start rpcbind + Blinkenlight server ──────────────────────────
+    if [[ "${ENABLE_GPIO}" == "true" ]]; then
+        log "Starting rpcbind"
+        rpcbind -w &
+        sleep 1
+        log "Starting Blinkenlight server (server11)"
+        "${SERVER11}" &
+        sleep 2
+    fi
+
+    # ── Launch SimH in detached screen session ────────────────────────────────
+    # Users can attach with: screen -x pidp11  (via SSH console in S2)
+    log "Launching SimH in screen session 'pidp11'"
+    screen -dmS pidp11 "${SIMH}" "${SHM_DIR}/tmpsimhcommand.txt"
+
+    # Wait for screen/SimH to exit
+    while screen -list 2>/dev/null | grep -q '\.pidp11'; do
+        sleep 5
+    done
+
+    # ── GPIO S4: stop Blinkenlight server before re-reading switches ──────────
+    if [[ "${ENABLE_GPIO}" == "true" ]]; then
+        pkill -x pidp1170_blinkenlightd 2>/dev/null || true
+        sleep 1
+    fi
+
+    # ── Check for front-panel reboot request ──────────────────────────────────
+    # client11 (SimH + realcons) writes "exit" to tmpsimhcommand.txt when the
+    # operator depresses the address rotary switch to trigger a system reboot.
+    if [[ "$(cat "${SHM_DIR}/tmpsimhcommand.txt" 2>/dev/null || true)" == "exit" ]]; then
+        log "Front-panel reboot request — re-reading SR switches and rebooting"
+        continue
+    fi
+
+    log "SimH exited — container stopping"
+    break
+
 done
-
-log "SimH exited — container stopping"

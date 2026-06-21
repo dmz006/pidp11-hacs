@@ -57,6 +57,7 @@ RUN apt-get update \
         libpcap0.8 \
         libreadline8 \
         libtirpc3 \
+        rpcbind \
         screen \
         python3 \
         curl \
