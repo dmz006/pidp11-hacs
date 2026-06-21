@@ -28,22 +28,32 @@ if [ -f /usr/lib/bashio/bashio.sh ]; then
     # shellcheck source=/dev/null
     source /usr/lib/bashio/bashio.sh
     # Returns empty string when Supervisor API is unreachable (direct docker-run)
-    _boot=$(bashio::config 'default_boot' 2>/dev/null || true)
-    _gpio=$(bashio::config 'enable_gpio'  2>/dev/null || true)
-    [[ -n "${_boot}" ]] && DEFAULT_BOOT="${_boot}"
-    [[ -n "${_gpio}" ]] && ENABLE_GPIO="${_gpio}"
+    _boot=$(bashio::config 'default_boot'          2>/dev/null || true)
+    _gpio=$(bashio::config 'enable_gpio'           2>/dev/null || true)
+    _sshpw=$(bashio::config 'ssh_password'         2>/dev/null || true)
+    _sshpwd=$(bashio::config 'ssh_password_disabled' 2>/dev/null || true)
+    _sshkeys=$(bashio::config 'ssh_authorized_keys' 2>/dev/null || true)
+    [[ -n "${_boot}"    ]] && DEFAULT_BOOT="${_boot}"
+    [[ -n "${_gpio}"    ]] && ENABLE_GPIO="${_gpio}"
+    [[ -n "${_sshpw}"   ]] && SSH_PASSWORD="${_sshpw}"
+    [[ -n "${_sshpwd}"  ]] && SSH_PASSWORD_DISABLED="${_sshpwd}"
+    [[ -n "${_sshkeys}" ]] && SSH_AUTHORIZED_KEYS="${_sshkeys}"
 fi
 # s6-overlay strips -e env vars from the CMD process; read them from the env dir
-DEFAULT_BOOT="${DEFAULT_BOOT:-$(cat "${_S6E}/DEFAULT_BOOT" 2>/dev/null || true)}"
-ENABLE_GPIO="${ENABLE_GPIO:-$(cat "${_S6E}/ENABLE_GPIO"   2>/dev/null || true)}"
+DEFAULT_BOOT="${DEFAULT_BOOT:-$(cat "${_S6E}/DEFAULT_BOOT"          2>/dev/null || true)}"
+ENABLE_GPIO="${ENABLE_GPIO:-$(cat "${_S6E}/ENABLE_GPIO"             2>/dev/null || true)}"
+SSH_PASSWORD="${SSH_PASSWORD:-$(cat "${_S6E}/SSH_PASSWORD"          2>/dev/null || true)}"
+SSH_PASSWORD_DISABLED="${SSH_PASSWORD_DISABLED:-$(cat "${_S6E}/SSH_PASSWORD_DISABLED" 2>/dev/null || true)}"
+SSH_AUTHORIZED_KEYS="${SSH_AUTHORIZED_KEYS:-$(cat "${_S6E}/SSH_AUTHORIZED_KEYS"       2>/dev/null || true)}"
 # Final hardcoded defaults
 DEFAULT_BOOT="${DEFAULT_BOOT:-211bsd}"
 ENABLE_GPIO="${ENABLE_GPIO:-false}"
+SSH_PASSWORD_DISABLED="${SSH_PASSWORD_DISABLED:-false}"
 
 log "Default boot: ${DEFAULT_BOOT} | GPIO: ${ENABLE_GPIO}"
 
 # ── Initial setup ─────────────────────────────────────────────────────────────
-mkdir -p "${SHM_DIR}" "${DISKS_DIR}"
+mkdir -p "${SHM_DIR}" "${DISKS_DIR}" /data/ssh
 
 if [[ ! -f "${SECRET_FILE}" ]]; then
     python3 -c "import secrets; print(secrets.token_hex(32))" > "${SECRET_FILE}"
@@ -80,19 +90,71 @@ _check_prestaged() {
     return 0
 }
 
-# ── Auth shim — start once, persists across reboots ──────────────────────────
-log "Starting auth shim (:2223 → SimH :2224)"
-SECRET_FILE="${SECRET_FILE}" python3 "${BIN_DIR}/authshim.py" &
-SHIM_PID=$!
+# ── SSH console setup ─────────────────────────────────────────────────────────
+_setup_ssh() {
+    # Host keys — generated once and persisted in /data/ssh/
+    if [[ ! -f /data/ssh/dropbear_rsa_host_key ]]; then
+        log "Generating SSH host keys"
+        dropbearkey -t rsa     -f /data/ssh/dropbear_rsa_host_key    >/dev/null 2>&1
+        dropbearkey -t ed25519 -f /data/ssh/dropbear_ed25519_host_key >/dev/null 2>&1
+    fi
+
+    # Authorized keys for pdp11 user
+    mkdir -p /home/pdp11/.ssh
+    chown pdp11:pdp11 /home/pdp11/.ssh
+    chmod 700 /home/pdp11/.ssh
+    if [[ -n "${SSH_AUTHORIZED_KEYS:-}" ]]; then
+        printf '%s\n' "${SSH_AUTHORIZED_KEYS}" > /home/pdp11/.ssh/authorized_keys
+        chown pdp11:pdp11 /home/pdp11/.ssh/authorized_keys
+        chmod 600 /home/pdp11/.ssh/authorized_keys
+        log "SSH: authorized_keys configured"
+    fi
+
+    # Password auth
+    local db_extra=""
+    if [[ "${SSH_PASSWORD_DISABLED}" == "true" ]]; then
+        db_extra="-s"
+        log "SSH: password auth disabled"
+    elif [[ -n "${SSH_PASSWORD:-}" ]]; then
+        echo "pdp11:${SSH_PASSWORD}" | chpasswd
+        log "SSH: password auth enabled"
+    else
+        db_extra="-s"
+        log "SSH: no password set — password auth disabled (configure ssh_password or ssh_authorized_keys)"
+    fi
+
+    if [[ -z "${SSH_PASSWORD:-}" ]] && [[ -z "${SSH_AUTHORIZED_KEYS:-}" ]]; then
+        log "SSH: WARNING — no credentials configured; SSH console will reject all logins"
+    fi
+
+    log "Starting SSH server (port 22 → 2211)"
+    # shellcheck disable=SC2086
+    dropbear -F -E -p 22 \
+        -r /data/ssh/dropbear_rsa_host_key \
+        -r /data/ssh/dropbear_ed25519_host_key \
+        -w ${db_extra} &
+    DROPBEAR_PID=$!
+}
+
+SHIM_PID=""
+DROPBEAR_PID=""
 
 cleanup() {
     log "Shutting down..."
-    kill "${SHIM_PID}" 2>/dev/null || true
+    [[ -n "${SHIM_PID}"     ]] && kill "${SHIM_PID}"     2>/dev/null || true
+    [[ -n "${DROPBEAR_PID}" ]] && kill "${DROPBEAR_PID}" 2>/dev/null || true
     pkill -x pidp1170_blinkenlightd 2>/dev/null || true
     pkill rpcbind 2>/dev/null || true
     screen -S pidp11 -X quit 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
+
+# ── Auth shim — start once, persists across reboots ──────────────────────────
+log "Starting auth shim (:2223 → SimH :2224)"
+SECRET_FILE="${SECRET_FILE}" python3 "${BIN_DIR}/authshim.py" &
+SHIM_PID=$!
+
+_setup_ssh
 
 # ── Main boot loop ────────────────────────────────────────────────────────────
 # Mirrors upstream pidp11.sh:
@@ -157,7 +219,8 @@ while true; do
     fi
 
     # ── Launch SimH in detached screen session ────────────────────────────────
-    # Users can attach with: screen -x pidp11  (via SSH console in S2)
+    # SSH users attach via:  ssh pdp11@<host> -p 2211
+    # ssh_console.sh runs:   sudo screen -x pidp11
     log "Launching SimH in screen session 'pidp11'"
     screen -dmS pidp11 "${SIMH}" "${SHM_DIR}/tmpsimhcommand.txt"
 

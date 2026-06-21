@@ -58,7 +58,9 @@ RUN apt-get update \
         libreadline8 \
         libtirpc3 \
         bsdmainutils \
+        dropbear \
         rpcbind \
+        sudo \
         screen \
         python3 \
         curl \
@@ -83,11 +85,18 @@ RUN chmod 755 /opt/pidp11/bin/pdp11_realcons \
 COPY systems/ /opt/pidp11/systems/
 
 # Scripts
-COPY getsel.sh   /opt/pidp11/bin/getsel.sh
-COPY authshim.py /opt/pidp11/bin/authshim.py
-COPY run.sh      /run.sh
+COPY getsel.sh       /opt/pidp11/bin/getsel.sh
+COPY authshim.py     /opt/pidp11/bin/authshim.py
+COPY ssh_console.sh  /opt/pidp11/bin/ssh_console.sh
+COPY run.sh          /run.sh
 RUN chmod +x /run.sh \
              /opt/pidp11/bin/getsel.sh \
-             /opt/pidp11/bin/authshim.py
+             /opt/pidp11/bin/authshim.py \
+             /opt/pidp11/bin/ssh_console.sh \
+ && useradd -ms /opt/pidp11/bin/ssh_console.sh pdp11 \
+ && echo '/opt/pidp11/bin/ssh_console.sh' >> /etc/shells \
+ && echo 'pdp11 ALL=(root) NOPASSWD: /usr/bin/screen -x pidp11' \
+        > /etc/sudoers.d/pidp11-ssh \
+ && chmod 440 /etc/sudoers.d/pidp11-ssh
 
 CMD ["/run.sh"]
