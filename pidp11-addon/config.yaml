@@ -2,7 +2,7 @@
 # Supervisor add-on manifest.
 slug: pidp11
 name: PiDP-11 Emulator
-version: "1.1.0"
+version: "1.4.0"
 description: >
   SimH PDP-11 emulator from obsolescence/pidp11, with PiDP-11 front-panel
   GPIO driver and a persistent SSH console.

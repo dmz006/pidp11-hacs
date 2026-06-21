@@ -82,7 +82,22 @@ Integration targets the remote Pi over the network; no local add-on required.~~
 > so HA auto-discovers the Pi and asks only for the shared secret. Manual IP/port entry
 > still works as a fallback. See README Topology B.
 
-## v1.4 — Tape / paper-tape / disk library service
+## ~~v1.4 — 20 Hz live Lovelace lamp animation~~ ✅ shipped as v1.4.0
+
+~~Real-time ADDRESS/DATA LED animation in the Lovelace card (deferred from v1.1 → v1.2 → now v1.4).~~
+
+> **Shipped:** Dedicated lamp stream on port 2226 (`_handle_lamp_stream` in authshim)
+> polls `EXAMINE PC` and `EXAMINE PSW` at up to 20 Hz and fires `pidp11_lamps` HA events.
+> The Lovelace card fast-path (`_updateLeds`) patches only `.adr`/`.dat` LED class lists
+> via `querySelectorAll` + `requestAnimationFrame` — no full DOM rebuild.
+>
+> Also ships a faithful PDP-11/70 front-panel card redesign: dark `#1a0d0d` panel,
+> orange-red LEDs, brick-red ADDRESS segment bar, purple DATA segment bar, 22-bit
+> ADDRESS row in `[1,3,3,3,3,3,3,3]` groups, 12-LED status row, PARITY H/L dots,
+> SR toggle switches with bit numbers, ADDR SELECT (8 pos) + DATA SELECT (4 pos)
+> rotary indicator rows, and footer control buttons.
+
+## v1.5 — Tape / paper-tape / disk library service
 
 - `pidp11.load_tape` service: URL or `/share/pidp11/media/…` path,
   downloads if remote, `attach pt0 …` via remote console.
@@ -104,28 +119,12 @@ second SimH process in another container, runs a scenario, discards.
 Useful for "will my boot script succeed" kind of automations. Needs
 resource guardrails.
 
-## v1.4 — 60 Hz live Lovelace lamp animation
-
-Real-time ADDRESS/DATA LED animation in the Lovelace card (deferred from v1.1 → v1.2 → now v1.4).
-Requires reading lamp state from `pidp1170_blinkenlightd` at the driver's update rate. Options:
-
-- **RTCLASS reader**: blinkenlightd speaks the RTCLASS wire protocol and exposes lamp
-  state. Connect to it directly from authshim and stream `EVENT lamps ...` to the coordinator.
-- **Shared memory poll**: blinkenlightd writes lamp state to shared memory; poll it in authshim.
-- **Upstream PR**: new push socket in pidp11 driver (was spike item in S5 plan).
-
-**Next steps:** spike which blinkenlightd interface is accessible from authshim without
-modifying the binary, then stream lamp register values through the existing EVENT channel
-or a new port 2226.
-
-## v1.5 — Tape / paper-tape / disk library service
-
 ## Priority order
 
 1. ~~v1.1 Lovelace panel dashboard~~ ✅ done
-2. ~~v1.2 Switch events + SR sensors~~ ✅ done (250 ms watch stream; 60 Hz lamps → v1.5)
+2. ~~v1.2 Switch events + SR sensors~~ ✅ done
 3. ~~v1.3 SR/cpu_mode sensors~~ ✅ done (active_device pending)
 4. ~~R6 Remote-Pi mDNS topology~~ ✅ done
-5. v1.4 60 Hz lamp animation. ← **next up**
-6. v1.5 Tape/state services.
+5. ~~v1.4 20 Hz lamp animation + faithful panel card~~ ✅ done
+6. v1.5 Tape/state services. ← **next up**
 7. v2+ later.

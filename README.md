@@ -335,7 +335,8 @@ Working end-to-end on Pi 5 + HAOS + PiDP-11 hat as of June 2026:
 - ✅ SR watch stream: 250 ms push channel for switch change events (port 2225)
 - ✅ Lamp stream: 20 Hz PC/PSW push channel for live LED animation (port 2226)
 - ✅ mDNS auto-discovery: remote HAOS finds the Pi on the LAN automatically
-- ⏳ v1.0.0 release tag + GHCR image build
+- ✅ v1.4.0 released (add-on + integration)
+- ⏳ v1.5.0 — tape / paper-tape / disk library service
 
 See `docs/sprints/` for the full sprint plan.
 
