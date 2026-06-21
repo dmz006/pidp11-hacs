@@ -59,7 +59,7 @@ async def _validate_connection(host: str, port: int, secret: str) -> str | None:
             pass
 
 
-class PiDP11ConfigFlow(ConfigFlow, domain=DOMAIN):
+class PiDP11ConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
     """Handle a config flow for PiDP-11."""
 
     VERSION = 1

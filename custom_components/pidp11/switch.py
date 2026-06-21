@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -45,7 +47,7 @@ class PiDP11CpuSwitch(CoordinatorEntity[PiDP11Coordinator], SwitchEntity):
     def available(self) -> bool:
         return self.coordinator.last_update_success and self.coordinator.data is not None
 
-    async def async_turn_on(self, **kwargs) -> None:
+    async def async_turn_on(self, **kwargs: Any) -> None:
         """Resume the PDP-11 CPU (CONT)."""
         try:
             await self.coordinator.async_send_command("CONT")
@@ -53,7 +55,7 @@ class PiDP11CpuSwitch(CoordinatorEntity[PiDP11Coordinator], SwitchEntity):
             raise HomeAssistantError(f"Failed to CONT: {exc}") from exc
         await self.coordinator.async_request_refresh()
 
-    async def async_turn_off(self, **kwargs) -> None:
+    async def async_turn_off(self, **kwargs: Any) -> None:
         """Halt the PDP-11 CPU (HALT)."""
         try:
             await self.coordinator.async_send_command("HALT")
