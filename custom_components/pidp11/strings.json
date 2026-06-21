@@ -26,6 +26,11 @@
     }
   },
   "entity": {
+    "binary_sensor": {
+      "halted": {
+        "name": "CPU halted"
+      }
+    },
     "sensor": {
       "cpu_state": {
         "name": "CPU state",
@@ -34,6 +39,17 @@
           "halted": "Halted",
           "offline": "Offline"
         }
+      },
+      "cpu_mode": {
+        "name": "CPU mode",
+        "state": {
+          "kernel": "Kernel",
+          "supervisor": "Supervisor",
+          "user": "User"
+        }
+      },
+      "sr": {
+        "name": "Switch register"
       },
       "system": {
         "name": "System"

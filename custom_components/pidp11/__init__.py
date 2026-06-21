@@ -27,7 +27,7 @@ from .coordinator import PiDP11Coordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[str] = ["sensor", "switch"]
+PLATFORMS: list[str] = ["binary_sensor", "sensor", "switch"]
 
 _CARD_URL = "/pidp11-hacs/pidp11-panel-card.js"
 _CARD_FILE = Path(__file__).parent / "www" / "pidp11-panel-card.js"

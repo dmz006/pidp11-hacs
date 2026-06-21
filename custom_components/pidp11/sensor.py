@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -25,6 +27,8 @@ async def async_setup_entry(
             PiDP11StatusSensor(coordinator, entry),
             PiDP11RegisterSensor(coordinator, entry, "PC", "pc"),
             PiDP11RegisterSensor(coordinator, entry, "PSW", "psw"),
+            PiDP11SRSensor(coordinator, entry),
+            PiDP11CpuModeSensor(coordinator, entry),
             PiDP11SystemSensor(coordinator, entry),
         ]
     )
@@ -122,3 +126,64 @@ class PiDP11SystemSensor(_PiDP11Base):
     @property
     def available(self) -> bool:
         return self.coordinator.last_update_success and self._state_data is not None
+
+
+class PiDP11SRSensor(_PiDP11Base):
+    """Switch Register — 22-bit SR value as octal; per-bit attributes SR0-SR21."""
+
+    _attr_icon = "mdi:toggle-switch-variant"
+    _attr_translation_key = "sr"
+    _attr_native_unit_of_measurement = "oct"
+
+    def __init__(self, coordinator: PiDP11Coordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_sr"
+
+    @property
+    def native_value(self) -> str | None:
+        if self._state_data is None:
+            return None
+        return self._state_data.sr
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        sr = self.native_value
+        if sr is None:
+            return {}
+        sr_int = int(sr, 8)
+        attrs: dict[str, Any] = {
+            "binary": format(sr_int, "022b"),
+            "decimal": sr_int,
+        }
+        for i in range(22):
+            attrs[f"SR{i}"] = bool(sr_int & (1 << i))
+        return attrs
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success and self._state_data is not None
+
+
+class PiDP11CpuModeSensor(_PiDP11Base):
+    """CPU execution mode derived from PSW bits 15-14: kernel / supervisor / user."""
+
+    _attr_icon = "mdi:shield-lock"
+    _attr_translation_key = "cpu_mode"
+
+    def __init__(self, coordinator: PiDP11Coordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_cpu_mode"
+
+    @property
+    def native_value(self) -> str | None:
+        if self._state_data is None:
+            return None
+        return self._state_data.cpu_mode
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and self._state_data is not None
+            and self._state_data.cpu_state != "offline"
+        )

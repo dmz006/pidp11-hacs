@@ -12,10 +12,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
+    CPU_MODE_KERNEL,
+    CPU_MODE_SUPERVISOR,
+    CPU_MODE_USER,
     CPU_STATE_HALTED,
     CPU_STATE_RUNNING,
     CURRENT_SYSTEM_PATH,
     DOMAIN,
+    EVENT_SR_CHANGED,
     UPDATE_INTERVAL_SECONDS,
 )
 
@@ -35,10 +39,12 @@ _STATE_TAIL = 300
 class PiDP11State:
     """Snapshot of the running emulator."""
 
-    cpu_state: str       # CPU_STATE_* constant
-    pc: str | None       # octal string e.g. "000400"
-    psw: str | None      # octal string
-    system: str | None   # "211bsd", "idled", etc.
+    cpu_state: str        # CPU_STATE_* constant
+    pc: str | None        # octal string e.g. "000400"
+    psw: str | None       # octal string
+    sr: str | None        # switch register, octal (22-bit)
+    cpu_mode: str | None  # CPU_MODE_* derived from PSW bits 15-14
+    system: str | None    # "211bsd", "idled", etc.
 
 
 class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
@@ -60,6 +66,7 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
         self.host = host
         self.port = port
         self._secret = secret
+        self._prev_sr: str | None = None
 
     # ── Public command API ────────────────────────────────────────────────────
 
@@ -76,14 +83,26 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
     async def _async_update_data(self) -> PiDP11State:
         system = _read_current_system()
         try:
-            async with asyncio.timeout(_CONNECT_TIMEOUT + _CMD_TIMEOUT * 2):
-                return await self._poll(system)
+            async with asyncio.timeout(_CONNECT_TIMEOUT + _CMD_TIMEOUT * 3):
+                state = await self._poll(system)
         except TimeoutError as exc:
             raise UpdateFailed("PiDP-11 connection timed out") from exc
         except UpdateFailed:
             raise
         except Exception as exc:
             raise UpdateFailed(f"PiDP-11 error: {exc}") from exc
+
+        # Fire SR-changed event when the switch register value changes.
+        new_sr = state.sr
+        if new_sr is not None and self._prev_sr is not None and new_sr != self._prev_sr:
+            self.hass.bus.async_fire(
+                EVENT_SR_CHANGED,
+                {"sr_old": self._prev_sr, "sr_new": new_sr},
+            )
+        if new_sr is not None:
+            self._prev_sr = new_sr
+
+        return state
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
@@ -159,7 +178,19 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
             raw = await self._read_to_prompt(reader)
             psw = _parse_register(raw[: -len(_PROMPT)].decode(errors="replace"))
 
-            return PiDP11State(cpu_state=cpu_state, pc=pc, psw=psw, system=system)
+            writer.write(b"EXAMINE SR\n")
+            await writer.drain()
+            raw = await self._read_to_prompt(reader)
+            sr = _parse_register(raw[: -len(_PROMPT)].decode(errors="replace"))
+
+            return PiDP11State(
+                cpu_state=cpu_state,
+                pc=pc,
+                psw=psw,
+                sr=sr,
+                cpu_mode=_parse_cpu_mode(psw),
+                system=system,
+            )
         finally:
             _close(writer)
 
@@ -203,6 +234,17 @@ def _strip_echo(cmd: str, text: str) -> str:
             continue
         out.append(line)
     return "\n".join(out).strip()
+
+
+def _parse_cpu_mode(psw: str | None) -> str | None:
+    """Derive CPU mode (kernel/supervisor/user) from PSW bits 15-14."""
+    if psw is None:
+        return None
+    try:
+        mode = (int(psw, 8) >> 14) & 0b11
+        return {0: CPU_MODE_KERNEL, 1: CPU_MODE_SUPERVISOR, 3: CPU_MODE_USER}.get(mode)
+    except ValueError:
+        return None
 
 
 def _read_current_system() -> str | None:

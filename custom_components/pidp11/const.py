@@ -30,3 +30,9 @@ SERVICE_EXAMINE: Final = "examine"
 CPU_STATE_RUNNING: Final = "running"
 CPU_STATE_HALTED: Final = "halted"
 CPU_STATE_OFFLINE: Final = "offline"
+
+CPU_MODE_KERNEL: Final = "kernel"
+CPU_MODE_SUPERVISOR: Final = "supervisor"
+CPU_MODE_USER: Final = "user"
+
+EVENT_SR_CHANGED: Final = "pidp11_sr_changed"
