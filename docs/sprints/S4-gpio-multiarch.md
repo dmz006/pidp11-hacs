@@ -1,6 +1,6 @@
 # Sprint 4 — GPIO + Multi-arch Release
 
-**Owner:** TBD. **Status:** in-progress (software complete; hardware test pending).
+**Owner:** TBD. **Status:** hardware-complete (all checklist items confirmed Jun 21 2026; CI image build + release tag deferred to v1.0.0).
 
 ## Goal
 
