@@ -6,6 +6,29 @@ using the switches and knobs, and shutting down safely.
 This applies whether you're running the add-on under Home Assistant or the
 [standalone Docker container](./standalone-docker.md).
 
+For more detail, see the [PiDP-11 how-to page](https://obsolescence.wixsite.com/obsolescence/pidp-11-how-to-use)
+and the [PiDP-11 Manual](https://obsolescence.dev/pidp11/PiDP-11_Manual.pdf) (pp. 12–15).
+
+---
+
+## Panel layout
+
+The PiDP-11 front panel reproduces the PDP-11/70 layout:
+
+- **SR switches** (22 toggles across the bottom) — set octal numbers for address/data/OS selection
+- **Toggle switches** (middle row, left to right): `LOAD ADRS`, `EXAM`, `DEP`, `CONT`, `HALT`,
+  `S INST` (single instruction), `START`
+- **Two rotary encoders on the right side of the panel** — one above the ADDRESS LED row,
+  one above the DATA LED row. Press the rotary encoder (click it in) to activate its hidden
+  function. The DATA knob selects the LED display source (DATA PATHS or DISPLAY REGISTER).
+- **ADDRESS LEDs** (top row, 22 LEDs) — shows program counter or bus address
+- **DATA LEDs** (bottom row, 16 LEDs) — shows data at the current address
+- **RUN lamp** — amber when CPU is running, dark when halted
+
+> The ADDR rotary encoder has a hidden function not present on the real PDP-11/70:
+> pressing it while the PiDP-11 software is running signals SimH to exit and restart,
+> reading the SR switches to select a new OS.
+
 ---
 
 ## OS selection — SR switch table
@@ -16,6 +39,7 @@ The SR switches are grouped in colored blocks of three — each block is one oct
 
 | SR (octal) | Category | System | Disk required |
 |-----------|----------|--------|---------------|
+| `0000` | Demo | `idled` — lamp demo (default, all switches down) | — |
 | `0001` | DEC | `rsx11mplus` — RSX-11M+ | `rsx11mp/PiDP11_DU0.dsk` |
 | `0002` | DEC | `rsts7` — RSTS/E v7.0 | Bundled |
 | `0003` | DEC | `rt11` — RT-11 | Bundled |
@@ -30,27 +54,40 @@ The SR switches are grouped in colored blocks of three — each block is one oct
 | `1000` | Nankervis | `nankervis` — multi-OS Nankervis system | Special |
 | `1001` | Demo | `idled` — lamp demo (alternate) | — |
 | `1002` | Demo | `blinky` — pure LED demo | — |
-| `0000` | Demo | `idled` — lamp demo (default) | — |
 
 **Bundled** — image is inside the Docker container, no staging needed.  
 **Auto-downloaded** — the container fetches it on first boot (2.11BSD only).  
 **Staged images** — see [staging disk images](./standalone-docker.md#7--staging-optional-disk-images).
 
-When all SR switches are down (`0000`), the system boots into `idled` by default.
-The `idled` program cycles through every available OS entry on the address LEDs (~2 s each),
-showing the SR switch value in binary — useful for finding the right switch setting.
+### Reading the switch setting from the idled display
+
+With all SR switches down (`0000`) the system boots `idled` by default —
+a 64-instruction PDP-11 "poem" by Mike Hill that keeps the front panel lights busy.
+
+While `idled` is running the ADDRESS LEDs cycle through every available OS entry
+(~2 s each), displaying the SR switch value in binary (MSB left). Read the lit LEDs
+to find the octal value for the OS you want, set the switches, then press the
+ADDR rotary encoder to boot it.
+
+**`idled` SR switch controls** (set while `idled` is running, before booting):
+
+| SR bits | Effect |
+|---------|--------|
+| SR 5–0 | Control the LED update speed on the DATA display |
+| SR 7 | When ON, also increments the ADDRESS display LEDs |
+
+**DATA knob** (right side of panel, above DATA LEDs): rotate to **DATA PATHS** or
+**DISPLAY REGISTER** to switch between two different LED animation modes.
 
 ---
 
 ## Boot sequence
 
-**To boot into a specific OS:**
-
 1. Set the SR switches to the octal value from the table above.
-2. **Press the ADDR rotary encoder center button** — the knob on the left side of the
-   address LEDs. On a real PDP-11/70 this is the `LOAD ADDRESS` switch; on the PiDP-11
-   it has a hidden extra function (not on the real hardware): pressing it signals SimH
-   to exit and restart into whichever OS the SR switches select.
+2. **Press the ADDR rotary encoder** (right side of panel, above ADDRESS LEDs).
+   This is the `LOAD ADDRESS` function on a real PDP-11/70; on the PiDP-11 pressing
+   it has the additional effect of signaling SimH to exit and restart into the
+   OS selected by the current SR switch setting.
 3. The running OS halts, SimH exits, and the container reads the SR switches and
    boots the selected OS.
 
@@ -60,16 +97,16 @@ showing the SR switch value in binary — useful for finding the right switch se
 
 ### Halt and continue
 
-1. Flip the **ENABLE/HALT** toggle to **HALT** — the CPU stops at the next instruction,
-   the RUN lamp goes dark.
-2. To resume: flip back to **ENABLE**, then toggle **CONT** — the CPU resumes and the
-   RUN lamp lights up.
+1. Flip the **HALT** toggle to the **HALT** position — the CPU stops at the next
+   instruction and the RUN lamp goes dark.
+2. To resume: flip back to **ENABLE**, then toggle **CONT** — the CPU resumes and
+   the RUN lamp lights up.
 
 ### Single-step execution
 
-1. Flip **ENABLE/HALT** to **HALT**.
+1. Flip **HALT** to **HALT** to stop the CPU.
 2. Toggle **CONT** once per instruction — each toggle executes one instruction.
-3. Watch the ADDRESS and DATA lamps change with each step.
+3. Watch the ADDRESS and DATA LEDs change with each step.
 4. To return to full speed: flip to **ENABLE** and toggle **CONT**.
 
 ### Examine a memory address or register
@@ -77,12 +114,13 @@ showing the SR switch value in binary — useful for finding the right switch se
 CPU must be halted.
 
 1. Set the SR switches to the address you want to inspect (in octal).
-2. Toggle **LOAD ADRS** — the ADDRESS LEDs mirror your SR switches.
+2. Toggle **LOAD ADRS** — the ADDRESS LEDs mirror your SR switches, confirming
+   the address is loaded into the bus address register.
 3. Toggle **EXAM** — the value at that address appears on the DATA LEDs.
 4. Toggle **EXAM** again to step to the next address automatically.
 
 **CPU registers** are at special addresses at the top of memory:
-R0 = `01777700`, R1 = `01777701`, and so on.
+R0 = `01777700`, R1 = `01777701`, and so on (each register at the next octal address).
 
 ### Deposit (write) to a memory address
 
@@ -103,8 +141,9 @@ CPU must be halted.
 
 ## Shutting down
 
-> **Important:** Always shut down the OS running inside the PDP-11 before cutting power,
-> just as you would on a real PDP-11.
+> **Important:** Always shut down the OS cleanly before halting, just as you would
+> on a real PDP-11. Do not just pull the power — the Pi needs 15 seconds to finish
+> writing to the SD card.
 
 ### Step 1 — shut down the OS
 
@@ -123,35 +162,60 @@ CPU must be halted.
 
 Once the OS is down:
 
-1. **Push the HALT switch down** to halt the CPU.
-2. **Depress the ADDRESS rotary knob** — this tells the PiDP-11 software to exit cleanly.
-3. **Wait 15 seconds** before cutting power to allow the Pi to finish writing.
+1. **Push the HALT toggle** to halt the CPU.
+2. **Press the ADDR rotary encoder** (right side of panel) — this tells the PiDP-11
+   software to exit cleanly.
+3. **Wait 15 seconds** before cutting power.
+
+---
+
+## SimH console (SSH)
+
+SSH into the container (port 2211 in standalone mode) to reach the SimH command line:
+
+```bash
+ssh pdp11@<pi-ip> -p 2211
+```
+
+Useful SimH commands:
+
+| Command | Effect |
+|---------|--------|
+| `HALT` | Stop the CPU |
+| `CONT` | Resume the CPU |
+| `EXAMINE <addr>` | Read memory at address (octal) |
+| `DEPOSIT <addr> <value>` | Write value to address |
+| `GO <addr>` | Start execution from address |
+| `EXIT` | Exit SimH (container will restart and re-read SR switches) |
+| `RESET ALL` | Reset all devices |
+
+These correspond directly to the physical front panel switches.
 
 ---
 
 ## Without physical hardware
 
-If you're running headless (no PiDP-11 hat), use the `DEFAULT_BOOT` environment variable
-to select an OS at startup:
+Use `DEFAULT_BOOT` to select an OS at container startup without touching switches:
 
 ```bash
 docker run -d ... -e DEFAULT_BOOT=211bsd ...
 ```
 
-Or SSH into the container and change OS from the SimH console:
+Or from the SimH SSH console:
 
 ```bash
-ssh pdp11@<pi-ip> -p 2211
-# In SimH, halt and exit to let the container reboot with current SR switches:
 HALT
-EXIT
+EXIT    # container restarts, reads SR switches (or DEFAULT_BOOT)
 ```
 
 ---
 
 ## Further reading
 
-- [PiDP-11 Manual](https://obsolescence.dev/pidp11/PiDP-11_Manual.pdf) — Chapter "Using the PiDP-11" (pp. 12–15)
+- [PiDP-11 how-to page](https://obsolescence.wixsite.com/obsolescence/pidp-11-how-to-use)
+- [PiDP-11 Manual](https://obsolescence.dev/pidp11/PiDP-11_Manual.pdf) — "Using the PiDP-11" (pp. 12–15)
 - [PDP-11/70 front panel deep dive](https://www.pdp-11.nl/pdp11-70startpage.html)
 - [PDP-11/70 Processor Handbook, Chapter 11](https://bitsavers.trailing-edge.com/pdf/dec/pdp11/1170/PDP-11_70_Handbook_1977-78.pdf)
 - [Front panel programming step-by-step](http://www.retrocmp.com/attachments/article/146/consoleserialport.blinkenlight_instructions.txt)
+- [idled boot.ini source](https://github.com/obsolescence/pidp11) — in `systems/idled/boot.ini`; the comments
+  show PDP-11 addressing modes, programming techniques, and alternate LED patterns
