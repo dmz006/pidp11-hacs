@@ -232,13 +232,13 @@ while true; do
         if [[ "${SEL}" == "blinky" ]]; then
             # blinky delegates to PDP-11xx.ini — patch that file too
             _pdp11="${SHM_DIR}/gpio_PDP-11xx.ini"
-            sed 's/^;set  realcons/set  realcons/;s/^;set realcons test/set realcons test/' \
+            sed 's/^;set  realcons/set  realcons/;s/^;set realcons test/set realcons test/;s/host=localhost/host=127.0.0.1/' \
                 "${SYSTEMS_DIR}/blinky/PDP-11xx.ini" > "${_pdp11}"
             # Redirect blinky's boot.ini to use our patched PDP-11xx.ini
             sed "s|do PDP-11xx.ini|do ${_pdp11}|" \
                 "${SYSTEMS_DIR}/blinky/boot.ini" > "${_ini}"
         else
-            sed 's/^;set realcons/set realcons/' "${SYSTEMS_DIR}/${SEL}/boot.ini" > "${_ini}"
+            sed 's/^;set realcons/set realcons/;s/host=localhost/host=127.0.0.1/' "${SYSTEMS_DIR}/${SEL}/boot.ini" > "${_ini}"
         fi
         printf 'cd %s\ndo %s\n' "${SYSTEMS_DIR}/${SEL}" "${_ini}" > "${SHM_DIR}/tmpsimhcommand.txt"
     else
@@ -247,12 +247,34 @@ while true; do
 
     # ── GPIO S4: start rpcbind + Blinkenlight server ──────────────────────────
     if [[ "${ENABLE_GPIO}" == "true" ]]; then
-        log "Starting rpcbind"
-        rpcbind -w &
-        sleep 1
+        # Under --network host the host's rpcbind owns port 111. If we bind-mount
+        # /run/rpcbind.sock from the host into the container, blinkenlightd registers
+        # with the HOST portmapper — the same one SimH queries. Start our own rpcbind
+        # only as a fallback when the host socket is absent (standalone bridge-mode test).
+        if [[ -S /run/rpcbind.sock ]]; then
+            log "Using host rpcbind (socket already present)"
+        else
+            log "Starting rpcbind"
+            rpcbind -w 2>/dev/null || true
+            sleep 1
+        fi
+        # Clear stale program-99 registration from a previous run so SimH finds
+        # the new blinkenlightd port rather than the old (now-refused) one.
+        rpcinfo -d 99 1 2>/dev/null || true
+        sleep 0.3
         log "Starting Blinkenlight server (server11)"
         "${SERVER11}" &
-        sleep 2
+        # Wait for blinkenlightd to register with portmapper before starting SimH.
+        # On Pi 5, GPIO hardware init can take several seconds.
+        _rpc_retries=20
+        until rpcinfo -p 2>/dev/null | grep -q '^ *99 ' || (( --_rpc_retries == 0 )); do
+            sleep 0.5
+        done
+        if rpcinfo -p 2>/dev/null | grep -q '^ *99 '; then
+            log "Blinkenlight server registered with portmapper"
+        else
+            log "WARNING: blinkenlightd did not register within 10 s — realcons may fail"
+        fi
     fi
 
     # ── Launch SimH in detached screen session ────────────────────────────────
