@@ -341,26 +341,54 @@ OS in sequence. Each entry stays on for ~2 s and the address LEDs show the SR
 switch value in binary (MSB left). Count the lit LEDs or read the octal value
 shown on the Lovelace card to find the setting for the OS you want.
 
-### Physical front-panel boot sequence
+### Physical front-panel sequences
 
-**To reboot into a different OS:**
+#### Reboot into a different OS
 1. Set the SR switches to the octal value for your desired OS (use the table above).
 2. Press the **ADDR rotary encoder center button** (the knob on the left side of
    the address display — this is the `LOAD ADDRESS` switch on the real PDP-11/70).
 3. The running OS halts and SimH exits; the container reads the SR switches and
    boots the newly selected OS.
 
-**To halt the running CPU without rebooting:**
-1. Flip the `ENABLE/HALT` toggle to the **HALT** position.
-2. The CPU halts at the next instruction; the RUN lamp goes dark.
-3. Flip back to `ENABLE` to resume, or press the ADDR knob to reboot.
+#### Halt and continue
+1. Flip the **ENABLE/HALT** toggle to the **HALT** position — the CPU stops at the next
+   instruction and the RUN lamp goes dark.
+2. Flip back to **ENABLE**, then toggle **CONT** (the CONT/ENABLE momentary switch) — the
+   CPU resumes from where it stopped and the RUN lamp lights up again.
 
-**To shut down cleanly from inside an OS:**
-- **RSX-11M+**: at the MCR prompt, type `SHUTDOWN`
-- **2.11BSD / Unix V7**: as root, type `halt` or `shutdown -h now`
-- **RT-11**: type `BYE`
-- **RSTS/E**: type `SHUTUP` at the KMON prompt
-Then flip `ENABLE/HALT` to HALT and press the ADDR knob to pick a new OS.
+#### Single-step execution
+1. Flip **ENABLE/HALT** to **HALT** to stop the CPU.
+2. Toggle **CONT** once per step — each toggle executes one instruction.
+3. Watch the ADDRESS and DATA lamps change with every step.
+4. Flip back to **ENABLE** and toggle **CONT** to return to full-speed execution.
+
+#### Examine a memory address or register
+1. Flip **ENABLE/HALT** to **HALT** (CPU must be halted).
+2. Set the SR switches to the address you want to inspect (in octal).
+3. Toggle **EXAM** — the value at that address appears on the DATA LEDs.
+4. Toggle **EXAM** again to step to the next address automatically.
+
+#### Deposit (write) to a memory address
+1. Halt the CPU (ENABLE/HALT → HALT).
+2. Set the SR switches to the **address** you want to write.
+3. Toggle **LOAD ADRS** — the ADDRESS LEDs mirror your SR switches, confirming the address.
+4. Set the SR switches to the **data value** you want to write.
+5. Toggle **DEP** — the value is written and the address auto-increments.
+
+#### Start a program from a known address
+1. Set the SR switches to the **starting address** of the program.
+2. Toggle **LOAD ADRS** — the ADDRESS LEDs confirm the address.
+3. Toggle **START** — the CPU begins executing from that address.
+
+#### Shut down an OS cleanly, then pick another
+1. Shut down from within the running OS:
+   - **RSX-11M+**: `SHUTDOWN` at the MCR prompt
+   - **2.11BSD / Unix V7**: `halt` or `shutdown -h now` as root
+   - **RT-11**: `BYE`
+   - **RSTS/E**: `SHUTUP` at the KMON prompt
+   - **Unix V5 / V6**: `haltsys` (or sync three times and power cycle)
+2. Once the OS has shut down, flip **ENABLE/HALT** to **HALT**.
+3. Set the SR switches to your new OS, then press the **ADDR rotary encoder button** to reboot.
 
 > **Note:** These sequences apply to the physical PiDP-11 hat. If you're
 > running headless (no hat), use `DEFAULT_BOOT` or the SSH console instead.

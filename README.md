@@ -90,13 +90,19 @@ SSH in, enjoy.
 docker run -d --name pidp11 --restart unless-stopped \
   --privileged --network host \
   -v /run/rpcbind.sock:/run/rpcbind.sock \
-  -v "$HOME/.pidp11/share:/share" \
+  -v /opt/pidp11-share:/share \
   -v pidp11-data:/data \
+  -e ENABLE_GPIO=true \
   -e SSH_PASSWORD=pdp11 \
+  -e SSH_PORT=2211 \
   ghcr.io/dmz006/pidp11-addon:latest
 ```
 
-Full instructions, prerequisites, and OS boot table: **[docs/standalone-docker.md](./docs/standalone-docker.md)**
+Full instructions, prerequisites, disk image staging, and OS boot table:
+**[docs/standalone-docker.md](./docs/standalone-docker.md)**
+
+To boot a different OS or operate the front panel switches:
+**[§8 — Boot a different OS / front panel sequences](./docs/standalone-docker.md#8--boot-a-different-os-with-the-front-panel-switches)**
 
 ---
 

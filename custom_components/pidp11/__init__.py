@@ -101,7 +101,7 @@ def _register_services(hass: HomeAssistant, coordinator: PiDP11Coordinator) -> N
         value = call.data["value"]
         await _send(f"DEPOSIT {addr} {value}")
 
-    async def handle_examine(call: ServiceCall) -> dict:
+    async def handle_examine(call: ServiceCall) -> dict[str, str]:
         addr = call.data["address"]
         try:
             result = await coordinator.async_send_command(f"EXAMINE {addr}")
