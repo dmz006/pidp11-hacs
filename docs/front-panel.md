@@ -25,9 +25,11 @@ The PiDP-11 front panel reproduces the PDP-11/70 layout:
 - **DATA LEDs** (bottom row, 16 LEDs) — shows data at the current address
 - **RUN lamp** — amber when CPU is running, dark when halted
 
-> The ADDR rotary encoder has a hidden function not present on the real PDP-11/70:
-> pressing it while the PiDP-11 software is running signals SimH to exit and restart,
-> reading the SR switches to select a new OS.
+> **ADDR rotary encoder — two behaviors depending on HALT switch position:**
+> - **HALT up (ENABLE)**: pressing the ADDR knob signals SimH to exit and restart into
+>   the OS selected by the current SR switches (hidden function, not on real PDP-11/70).
+> - **HALT down (HALT)**: pressing the ADDR knob cleanly shuts down the Pi.
+>   Wait 30 seconds before removing power.
 
 ---
 
@@ -83,12 +85,11 @@ ADDR rotary encoder to boot it.
 
 ## Boot sequence
 
-1. Set the SR switches to the octal value from the table above.
-2. **Press the ADDR rotary encoder** (right side of panel, above ADDRESS LEDs).
-   This is the `LOAD ADDRESS` function on a real PDP-11/70; on the PiDP-11 pressing
-   it has the additional effect of signaling SimH to exit and restart into the
-   OS selected by the current SR switch setting.
-3. The running OS halts, SimH exits, and the container reads the SR switches and
+1. Make sure the **HALT toggle is up (ENABLE position)**.
+2. Set the SR switches to the octal value from the table above.
+3. **Press the ADDR rotary encoder** (right side of panel, above ADDRESS LEDs) — SimH
+   exits and the container restarts into the OS selected by the SR switches.
+4. The running OS halts, SimH exits, and the container reads the SR switches and
    boots the selected OS.
 
 ---
@@ -162,10 +163,10 @@ CPU must be halted.
 
 Once the OS is down:
 
-1. **Push the HALT toggle** to halt the CPU.
-2. **Press the ADDR rotary encoder** (right side of panel) — this tells the PiDP-11
-   software to exit cleanly.
-3. **Wait 15 seconds** before cutting power.
+1. **Flip the HALT toggle to HALT** to stop the CPU.
+2. **Press the ADDR rotary encoder** (right side of panel) — with HALT down, this tells
+   the PiDP-11 software to exit cleanly rather than reboot.
+3. **Wait 30 seconds** before cutting power to let the Pi finish writing to the SD card.
 
 ---
 
@@ -207,6 +208,32 @@ Or from the SimH SSH console:
 HALT
 EXIT    # container restarts, reads SR switches (or DEFAULT_BOOT)
 ```
+
+---
+
+## Hardware test checklist (first power-on)
+
+After assembly, verify each switch and LED row works before normal use.
+Boot into `idled` (all SR switches down) so the lamps are active.
+
+1. **HALT switch** — flip down; the machine should stop (RUN lamp goes dark).
+2. **HALT switch** — flip back up to ENABLE.
+3. **CONT switch** — toggle; the lamps should start moving again.
+4. **HALT switch** — flip down again.
+5. **DEP switch** — with all SR switches down and the ADDR rotary dial in the CONSULT
+   position, toggle DEP; the bottom DATA LED row should light up.
+6. **LOAD ADRS switch** — toggle it; the SR switch values should appear on the
+   ADDRESS LED row (top row). With all switches down = all dark.
+7. **Each SR switch individually** — lift SR switch 0 (rightmost), toggle LOAD ADRS;
+   LED 0 in the ADDRESS row should light. Lower it, raise SR switch 1, repeat.
+   Work through all 22 SR switches to confirm each one drives the right LED.
+8. **TEST LAMP (white switch)** — clear all SR switches, then lift the white switch;
+   every single lamp on the panel should light up. This confirms the LED board is good.
+9. **ADDR rotary encoder press (HALT up = reboot)** — confirm HALT is up (ENABLE),
+   press the ADDR knob; the system should restart into whichever OS the SR switches
+   select (all down = `idled` = effectively a reset).
+10. **ADDR rotary encoder press (HALT down = shutdown)** — flip HALT down, press the
+    ADDR knob; the Pi shuts down cleanly. Wait 30 seconds, then power off.
 
 ---
 
