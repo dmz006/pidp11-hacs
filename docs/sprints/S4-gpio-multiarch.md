@@ -42,6 +42,7 @@ is available for testing.
 - ✅ `tests/addon/test_startup_ordering.py::test_waits_for_dev_mem` — xfail stub
 - ✅ `tests/addon/test_startup_ordering.py::test_blinkenlightd_starts_before_simh` — xfail stub
 - [ ] Hardware checklist entries (see `tests/hardware/MANUAL-CHECKLIST.md`):
+  - [x] Lamps animate (idled pattern confirmed on physical hat — Jun 21 2026)
   - [ ] Lamps animate while 2.11BSD boots
   - [ ] SR register read via `pidp11.examine` matches physical switches
   - [ ] START/HALT switches change `sensor.pidp11_state` within 1 s
