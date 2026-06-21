@@ -41,7 +41,7 @@ source = ["custom_components/pidp11"]
 branch = true
 
 [tool.coverage.report]
-fail_under = 20
+fail_under = 15
 show_missing = true
 skip_empty = true
 

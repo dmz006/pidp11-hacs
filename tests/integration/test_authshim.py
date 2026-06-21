@@ -12,6 +12,11 @@ from pathlib import Path
 
 import pytest
 
+# pytest-homeassistant-custom-component enables pytest-socket which blocks
+# raw TCP by default. These tests start real asyncio TCP servers on loopback
+# so we opt in to socket access at the module level.
+pytestmark = [pytest.mark.enable_socket]
+
 # Make the add-on directory importable.
 _ADDON_DIR = Path(__file__).resolve().parent.parent.parent / "pidp11-addon"
 if str(_ADDON_DIR) not in sys.path:
