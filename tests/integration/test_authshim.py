@@ -70,6 +70,20 @@ async def _connect_and_auth(
     return reader, writer
 
 
+async def _close_servers(*servers: asyncio.Server) -> None:
+    """Close servers and cancel any handler tasks they may have spawned.
+
+    Using server.close() without wait_closed() avoids blocking on handlers
+    that loop indefinitely (e.g. _handle_watch when SR value stays constant).
+    """
+    for s in servers:
+        s.close()
+    pending = {t for t in asyncio.all_tasks() if t is not asyncio.current_task()}
+    for t in pending:
+        t.cancel()
+    await asyncio.gather(*pending, return_exceptions=True)
+
+
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -84,11 +98,13 @@ async def test_bad_auth_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     server = await asyncio.start_server(shim._handle, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
 
-    async with server:
+    try:
         reader, writer = await _connect_and_auth(port, secret="wrongsecret")
         response = await asyncio.wait_for(reader.readline(), timeout=2.0)
         writer.close()
         await writer.wait_closed()
+    finally:
+        await _close_servers(server)
 
     assert response.startswith(b"DENY")
 
@@ -105,11 +121,13 @@ async def test_watch_bad_auth_rejected(tmp_path: Path, monkeypatch: pytest.Monke
     server = await asyncio.start_server(shim._handle_watch, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
 
-    async with server:
+    try:
         reader, writer = await _connect_and_auth(port, secret="wrongsecret")
         response = await asyncio.wait_for(reader.readline(), timeout=2.0)
         writer.close()
         await writer.wait_closed()
+    finally:
+        await _close_servers(server)
 
     assert response.startswith(b"DENY")
 
@@ -133,17 +151,16 @@ async def test_watch_streams_initial_sr(
     watch_server = await asyncio.start_server(shim._handle_watch, "127.0.0.1", 0)
     watch_port = watch_server.sockets[0].getsockname()[1]
 
-    async with simh_server, watch_server:
-        reader, writer = await _connect_and_auth(watch_port)
-
-        # First line should be OK
+    reader, writer = await _connect_and_auth(watch_port)
+    try:
         ok_line = await asyncio.wait_for(reader.readline(), timeout=2.0)
         assert ok_line.strip() == b"OK"
 
-        # Next line should be the initial SR event
         event_line = await asyncio.wait_for(reader.readline(), timeout=2.0)
         writer.close()
         await writer.wait_closed()
+    finally:
+        await _close_servers(watch_server, simh_server)
 
     assert event_line.strip() == b"EVENT sr value=000042"
 
@@ -167,20 +184,18 @@ async def test_watch_streams_sr_change(
     watch_server = await asyncio.start_server(shim._handle_watch, "127.0.0.1", 0)
     watch_port = watch_server.sockets[0].getsockname()[1]
 
-    async with simh_server, watch_server:
-        reader, writer = await _connect_and_auth(watch_port)
-
-        # First line: OK
+    reader, writer = await _connect_and_auth(watch_port)
+    try:
         ok_line = await asyncio.wait_for(reader.readline(), timeout=2.0)
         assert ok_line.strip() == b"OK"
 
-        # Second line: initial SR=000000 event
         event1 = await asyncio.wait_for(reader.readline(), timeout=2.0)
         assert event1.strip() == b"EVENT sr value=000000"
 
-        # Third line: SR changed to 000001
         event2 = await asyncio.wait_for(reader.readline(), timeout=2.0)
         assert event2.strip() == b"EVENT sr value=000001"
 
         writer.close()
         await writer.wait_closed()
+    finally:
+        await _close_servers(watch_server, simh_server)

@@ -106,10 +106,23 @@ Front panel controls, OS switch table, and shutdown procedures:
 
 ---
 
-## Supported targets (HA)
+## Supported topologies
 
-**HAOS** and **HA Supervised** only. Both ship Supervisor so both can install the
-add-on container. HA Container and HA Core are not supported — they have no Supervisor.
+### Topology A — Pi runs both the emulator and HAOS (add-on mode)
+
+The Pi 5 runs **HAOS** directly (or HA Supervised). The PiDP-11 add-on installs inside
+the Supervisor. The HACS integration talks to it on `127.0.0.1:2223`. This is the
+simplest setup — everything on one board.
+
+### Topology B — Pi runs the emulator; HAOS is on a separate machine
+
+The Pi 5 runs **Docker standalone** with the PiDP-11 image. Your Home Assistant instance
+is a VM, NUC, or another host on the same LAN. The HACS integration is installed on
+that remote HA and connects to the Pi's IP on port 2223. mDNS/zeroconf auto-discovery
+advertises the Pi on your LAN so HA finds it automatically.
+
+Both topologies are fully supported. HAOS and HA Supervised both work in topology A.
+HA Container and HA Core do not support add-ons and are only usable in topology B.
 
 Hardware: **Raspberry Pi 5** with the PiDP-11 hat. The Pi 5 uses the RP1 I/O chip;
 the GPIO driver has been tested and confirmed working (`/dev/gpiomem0`–`/dev/gpiomem4`).
@@ -118,28 +131,38 @@ the GPIO driver has been tested and confirmed working (`/dev/gpiomem0`–`/dev/g
 
 ## Quick install
 
-### 1 — Add-on (the emulator)
+### Topology A — Pi + HAOS (add-on mode)
 
 1. Settings → Add-ons → Add-on Store → ⋮ → **Repositories** → paste `https://github.com/dmz006/pidp11-hacs`. Install **PiDP-11 Emulator**.
 2. Add-on **Configuration** → set an `ssh_password` → **Start**.
 3. Watch the add-on log: within ~30 s you should see `[pidp11] Starting SimH` and the
    physical lamps should begin blinking.
-
-### 2 — HACS Integration (the HA side)
-
 4. HACS → ⋮ → **Custom repositories** → add `https://github.com/dmz006/pidp11-hacs`, category *Integration*. Install **PiDP-11**.
 5. Settings → Devices & Services → **Add Integration** → *PiDP-11*.
-   - Host: `127.0.0.1` (on HAOS, the add-on is reachable at localhost)
+   - Host: `127.0.0.1` (add-on is reachable at localhost)
    - Port: `2223`
-   - Shared secret: auto-discovered from `/share/pidp11/remote_console.secret` if HA
-     core can read it; otherwise copy from the add-on log.
-6. The integration creates a **PiDP-11** device with four sensors and a `CPU running`
-   switch.
+   - Shared secret: auto-detected from `/share/pidp11/remote_console.secret`
+6. Open any Lovelace dashboard → **Edit** → **Add Card** → search *PiDP-11 Front Panel*.
 
-### 3 — Dashboard
+### Topology B — Pi running Docker; HAOS on a separate host
 
-7. Open any Lovelace dashboard → **Edit** → **Add Card** → search *PiDP-11 Front Panel*
-   (or paste the YAML above). Done.
+1. On the Pi: follow **[docs/standalone-docker.md](./docs/standalone-docker.md)** to start
+   the container. The add-on image advertises itself via mDNS and listens on port 2223.
+2. On your HAOS VM / NUC:
+   - HACS → ⋮ → **Custom repositories** → add `https://github.com/dmz006/pidp11-hacs`, category *Integration*. Install **PiDP-11**.
+   - Restart HA.
+3. HA should show **"New device found: PiDP-11"** within ~30 s (mDNS auto-discovery).
+   Click **Configure**, enter the shared secret and you're done.
+
+   **If the mDNS notification doesn't appear** (different subnets, or multicast blocked):
+   Settings → Devices & Services → **Add Integration** → *PiDP-11* → enter the Pi's IP,
+   port `2223`, and the shared secret manually.
+
+   **To retrieve the secret from the Pi:**
+   ```sh
+   ssh pdp11@<pi-ip> -p 2211 'cat /data/remote_console.secret'
+   # or read it from the container log on first boot
+   ```
 
 ### SSH to the PDP-11 console
 
@@ -163,6 +186,15 @@ is right there. Type `HALT`, then `EXAMINE PC`, then `CONTINUE` — watch the LE
 | `sensor.pidp11_pc` | Program counter (octal) |
 | `sensor.pidp11_psw` | Processor status word (octal) |
 | `sensor.pidp11_system` | Booted OS: `idled`, `211bsd`, `rsx11mp`, … |
+| `sensor.pidp11_cpu_mode` | `kernel` / `supervisor` / `user` (from PSW bits 15–14) |
+| `sensor.pidp11_sr` | Switch register (octal) with per-bit attributes `SR0`–`SR21` |
+
+### Binary sensors
+
+| Entity | What it shows |
+|--------|---------------|
+| `binary_sensor.pidp11_halted` | `on` when CPU is halted |
+| `binary_sensor.pidp11_sr0` – `binary_sensor.pidp11_sr21` | Individual front-panel switch positions (22 sensors, updated via 250 ms push stream) |
 
 ### Services
 
@@ -292,10 +324,13 @@ Working end-to-end on Pi 5 + HAOS + PiDP-11 hat as of June 2026:
 - ✅ Lamps blink (IDLED pattern, 2.11BSD boot animation, all confirmed)
 - ✅ SR switch reading works (scansw, aarch64, Pi 5 RP1 GPIO)
 - ✅ Boot-select encoder works (SW0 up → `0001` → RSX-11M+)
-- ✅ HA sensors: cpu_state, PC, PSW, system
+- ✅ HA sensors: cpu_state, PC, PSW, system, cpu_mode, switch register (SR)
+- ✅ Binary sensors: CPU halted, SR0–SR21 (22 per-switch sensors)
 - ✅ HALT/CONTINUE services work; HALT→RUNNING transition in < 3 s
 - ✅ SSH console (port 2211)
 - ✅ Lovelace front panel card (S5 phase 1 — register snapshot, not live lamps)
+- ✅ SR watch stream: 250 ms push channel for switch change events (port 2225)
+- ✅ mDNS auto-discovery: remote HAOS finds the Pi on the LAN automatically
 - ⏳ v1.0.0 release tag + GHCR image build
 - ⏳ S5 phase 2: real-time lamp animation (needs driver push channel)
 
