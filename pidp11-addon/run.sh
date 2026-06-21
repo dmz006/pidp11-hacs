@@ -185,7 +185,12 @@ while true; do
     # ── Select boot system ────────────────────────────────────────────────────
     if [[ "${ENABLE_GPIO}" == "true" ]] && [[ -x "${BIN_DIR}/scansw" ]]; then
         log "Reading SR switches..."
-        sw=$("${BIN_DIR}/scansw" 2>/dev/null || echo "0")
+        # scansw may exit non-zero on Pi 5 (GPIO probe errors to stderr) while
+        # still printing the correct decimal SR value on stdout.  Capture only
+        # the first output line; discard exit status separately so set -e doesn't
+        # abort the script.
+        sw=$("${BIN_DIR}/scansw" 2>/dev/null | head -1) || true
+        sw="${sw:-0}"
         lo=$(( sw % 262144 ))
         lo=$(printf "%04o" "${lo}")
         _rawsel=$("${BIN_DIR}/getsel.sh" "${lo}")

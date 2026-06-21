@@ -27,12 +27,11 @@ is available for testing.
    when `ENABLE_GPIO=true`. `blinky` handled as a special case (patches
    `PDP-11xx.ini` separately, redirects `boot.ini` → patched copy). Boot.ini
    source files remain unchanged so container-only operation still works.
-4b. ⏳ **Boot-select encoder.** SR switch reading is wired (`scansw` → `getsel.sh`).
+4b. ✅ **Boot-select encoder.** SR switch reading confirmed end-to-end (Jun 21 2026).
    `scansw` fixed for Pi 5 (64-bit aarch64 via `rm -f scansw && make CC=gcc`).
-   After rebuild, lamps were dark on first start — root cause: stale rpcbind program-99
-   registration from prior container left blinkenlightd unreachable; fixed in run.sh
-   with `pkill -x pidp1170_blinkenlightd` before `rpcinfo -d 99 1` + sleep 1.
-   `sensor.pidp11_boot_select` HA entity test pending.
+   SW0-up → octal `0001` → `rsx11mp` correctly selected; disk absent → fell back to
+   idled (expected). `sensor.pidp11_system` is the HA entity (not a separate
+   `boot_select` entity — system field already reflects the selected/running OS).
 5. ⏳ **CI image build.** Build `linux/arm64` image, push to
    `ghcr.io/<owner>/pidp11-addon-aarch64:X.Y.Z` on tag. Deferred to v1.0.0 release.
 6. ⏳ **Hardware checklist.** Every v1 feature has a checklist entry in
@@ -49,7 +48,7 @@ is available for testing.
   - [x] Lamps animate while 2.11BSD boots (lamp activity confirmed Jun 21 2026)
   - [x] SR register read via `EXAMINE SR` matches physical switches (all-down=000000, SW0-up=000001 confirmed Jun 21 2026; NOTE: use `EXAMINE SR` not `EXAMINE 177570` — latter reads through 2.11BSD MMU and gives wrong value)
   - [x] START/HALT switches change `sensor.pidp11_state` within 3 s (HALTED→RUNNING transition confirmed Jun 21 2026; polling at 3s interval)
-  - [ ] Boot-select encoder changes `sensor.pidp11_boot_select`
+  - [x] Boot-select encoder: SW0-up → octal 0001 → rsx11mp selected (Jun 21 2026; disk absent → idled fallback; `sensor.pidp11_system` is the HA entity)
   - [x] Cold-boot HAOS → emulator up and hat responsive in < 60 s (authshim t=14s, SimH RUNNING t=30s, Jun 21 2026)
 
 ## Exit gate
