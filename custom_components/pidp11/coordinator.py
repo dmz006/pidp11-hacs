@@ -109,22 +109,32 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
         """Drain ALL buffered SimH output (history + current state).
 
         SimH replays its entire console buffer to every new remote connection.
-        We must read past that history to reach the current prompt before
-        sending commands, and we inspect only the tail for CPU state.
+        Strategy:
+        1. readuntil(sim>) to wait for the initial banner (may take 1-2s after
+           connection before SimH sends anything).
+        2. Drain any remaining buffered data with a short quiet timeout — this
+           consumes historical output from prior sessions that follows the first
+           prompt.
+        We inspect only the tail of the combined buffer for CPU state.
         """
         buf = bytearray()
-        deadline = asyncio.get_event_loop().time() + _CMD_TIMEOUT
-        while asyncio.get_event_loop().time() < deadline:
+        # Step 1: wait for at least the initial banner + first sim> prompt.
+        try:
+            initial = await asyncio.wait_for(
+                reader.readuntil(_PROMPT), timeout=_CMD_TIMEOUT
+            )
+            buf.extend(initial)
+        except (asyncio.TimeoutError, asyncio.IncompleteReadError):
+            pass
+        # Step 2: drain remaining history (0 bytes on a fresh session).
+        while True:
             try:
                 chunk = await asyncio.wait_for(reader.read(4096), timeout=_DRAIN_QUIET)
                 if not chunk:
                     break
                 buf.extend(chunk)
-                # Extend hard deadline on each received chunk so we don't
-                # cut off mid-message for slow/large buffers.
-                deadline = asyncio.get_event_loop().time() + _CMD_TIMEOUT
             except asyncio.TimeoutError:
-                break  # quiet for _DRAIN_QUIET seconds — we're at the prompt
+                break
         return bytes(buf)
 
     async def _poll(self, system: str | None) -> PiDP11State:

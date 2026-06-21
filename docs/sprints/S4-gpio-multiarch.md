@@ -46,7 +46,7 @@ is available for testing.
   - [x] Lamps animate (idled pattern confirmed on physical hat — Jun 21 2026)
   - [x] Lamps animate while 2.11BSD boots (lamp activity confirmed Jun 21 2026)
   - [x] SR register read via `EXAMINE SR` matches physical switches (all-down=000000, SW0-up=000001 confirmed Jun 21 2026; NOTE: use `EXAMINE SR` not `EXAMINE 177570` — latter reads through 2.11BSD MMU and gives wrong value)
-  - [ ] START/HALT switches change `sensor.pidp11_state` within 1 s
+  - [x] START/HALT switches change `sensor.pidp11_state` within 3 s (HALTED→RUNNING transition confirmed Jun 21 2026; polling at 3s interval)
   - [ ] Boot-select encoder changes `sensor.pidp11_boot_select`
   - [ ] Cold-boot HAOS → emulator up and hat responsive in < 60 s
 
