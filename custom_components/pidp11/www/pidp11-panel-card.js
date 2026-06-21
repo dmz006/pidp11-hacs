@@ -2,7 +2,7 @@
  * PiDP-11 Front Panel — Lovelace custom card.
  *
  * Renders an amber-on-dark blinkenlight panel showing the PDP-11/70 CPU
- * registers read from the PiDP-11 HA integration.
+ * registers and front-panel switch state from the PiDP-11 HA integration.
  *
  * Live animation: subscribes to pidp11_lamps HA events fired by the
  * coordinator's lamp watch task (port 2226, 20 Hz poll of EXAMINE PC/PSW).
@@ -12,10 +12,12 @@
  *   type: custom:pidp11-panel-card
  *
  * Optional overrides (entity IDs are auto-detected by default):
- *   state_entity:  sensor.pidp11_cpu_state
- *   pc_entity:     sensor.pidp11_pc
- *   psw_entity:    sensor.pidp11_psw
- *   system_entity: sensor.pidp11_system
+ *   state_entity:     sensor.pidp11_cpu_state
+ *   pc_entity:        sensor.pidp11_pc
+ *   psw_entity:       sensor.pidp11_psw
+ *   system_entity:    sensor.pidp11_system
+ *   sr_prefix:        binary_sensor.pidp11_sr   (appended with 0..21)
+ *   cpu_mode_entity:  sensor.pidp11_cpu_mode
  */
 
 (function () {
@@ -49,6 +51,39 @@
       }
     });
     return html + "</div>";
+  }
+
+  // Render a row of switch indicators (SR bits), MSB-first.
+  // groups = array of counts per group, e.g. [6,6,6,4].
+  function swRow(bits, groups) {
+    let html = '<div class="sws">';
+    let idx = 0;
+    groups.forEach(function (count, gi) {
+      if (gi > 0) html += '<span class="sep"></span>';
+      for (let k = 0; k < count; k++, idx++) {
+        html += '<span class="sw ' + (bits[idx] ? "on" : "off") + '"></span>';
+      }
+    });
+    return html + "</div>";
+  }
+
+  // Render a rotary selector indicator row.
+  // modes = array of {label, active} objects.
+  function selRow(label, modes) {
+    let dots = modes.map(function (m) {
+      return (
+        '<div class="selitem">' +
+          '<div class="seldot' + (m.active ? " on" : "") + '"></div>' +
+          '<div class="sellbl">' + m.label + "</div>" +
+        "</div>"
+      );
+    }).join("");
+    return (
+      '<div class="selrow">' +
+        '<span class="selhdr">' + label + "</span>" +
+        '<div class="selmodes">' + dots + "</div>" +
+      "</div>"
+    );
   }
 
   // ── Styles ───────────────────────────────────────────────────────────────────
@@ -91,7 +126,7 @@
       margin: 3px 0 0;
       font-size: 8px;
       letter-spacing: 2px;
-      color: #3a3a44;
+      color: #606072;
       text-transform: uppercase;
     }
 
@@ -117,10 +152,10 @@
     .runlamp .dlabel {
       font-size: 8px;
       letter-spacing: 2px;
-      color: #3a3a44;
+      color: #606072;
       text-transform: uppercase;
     }
-    .runlamp.running .dlabel { color: #7a4a10; }
+    .runlamp.running .dlabel { color: #9a6020; }
 
     /* ── Register rows ── */
     .regrow { margin-bottom: 11px; }
@@ -135,12 +170,12 @@
     .rowhead .rlabel {
       font-size: 8px;
       letter-spacing: 2px;
-      color: #383840;
+      color: #686878;
       text-transform: uppercase;
     }
     .rowhead .rval {
       font-size: 11px;
-      color: #7a5020;
+      color: #9a6030;
       letter-spacing: 1px;
     }
 
@@ -163,11 +198,77 @@
       box-shadow: 0 0 6px #ff8c00;
     }
     .led.off { background: #1a0a00; }
+
+    /* ── SR switches ── */
+    .swrow { margin-top: 10px; }
+    .sws {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    }
+    .sw {
+      display: inline-block;
+      width: 7px;
+      height: 11px;
+      border-radius: 2px;
+      border: 1px solid #1a0900;
+      flex-shrink: 0;
+    }
+    .sw.on  { background: #cc5500; box-shadow: 0 0 3px #cc5500; }
+    .sw.off { background: #190900; }
+
     .sep {
       display: inline-block;
       width: 5px;
       flex-shrink: 0;
     }
+
+    /* ── Rotary selector indicator rows ── */
+    .selrow {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      margin-top: 9px;
+    }
+    .selhdr {
+      font-size: 6px;
+      letter-spacing: 1px;
+      color: #505060;
+      text-transform: uppercase;
+      min-width: 28px;
+      padding-top: 5px;
+    }
+    .selmodes {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+    .selitem {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+    }
+    .seldot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #190b00;
+      border: 1px solid #1a0900;
+    }
+    .seldot.on {
+      background: #ff8c00;
+      box-shadow: 0 0 3px #ff8c00;
+    }
+    .sellbl {
+      font-size: 5.5px;
+      color: #505060;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .selitem .sellbl.active { color: #9a6020; }
 
     /* ── Bottom bar ── */
     .bar {
@@ -181,7 +282,7 @@
     .sysinfo .syslbl {
       font-size: 8px;
       letter-spacing: 2px;
-      color: #2e2e36;
+      color: #505060;
       text-transform: uppercase;
       margin-bottom: 2px;
     }
@@ -215,7 +316,7 @@
     .ind .ilbl {
       font-size: 7px;
       letter-spacing: 1px;
-      color: #2a2a30;
+      color: #505060;
       text-transform: uppercase;
       white-space: nowrap;
     }
@@ -240,14 +341,16 @@
 
     PiDP11PanelCard.prototype.setConfig = function (config) {
       this._cfg = {
-        state_entity:  config.state_entity  || "sensor.pidp11_cpu_state",
-        pc_entity:     config.pc_entity     || "sensor.pidp11_pc",
-        psw_entity:    config.psw_entity    || "sensor.pidp11_psw",
-        system_entity: config.system_entity || "sensor.pidp11_system",
+        state_entity:    config.state_entity    || "sensor.pidp11_cpu_state",
+        pc_entity:       config.pc_entity       || "sensor.pidp11_pc",
+        psw_entity:      config.psw_entity      || "sensor.pidp11_psw",
+        system_entity:   config.system_entity   || "sensor.pidp11_system",
+        sr_prefix:       config.sr_prefix       || "binary_sensor.pidp11_sr",
+        cpu_mode_entity: config.cpu_mode_entity || "sensor.pidp11_cpu_mode",
       };
     };
 
-    PiDP11PanelCard.prototype.getCardSize = function () { return 3; };
+    PiDP11PanelCard.prototype.getCardSize = function () { return 5; };
 
     PiDP11PanelCard.prototype.disconnectedCallback = function () {
       // Unsubscribe from lamp events when the card is removed from the DOM
@@ -345,10 +448,11 @@
     PiDP11PanelCard.prototype._update = function () {
       if (!this._cfg || !this._hass) return;
 
-      var cpu    = this._st(this._cfg.state_entity) || "offline";
-      var pcOct  = this._st(this._cfg.pc_entity);
-      var pswOct = this._st(this._cfg.psw_entity);
-      var sys    = this._st(this._cfg.system_entity) || "—";
+      var cpu     = this._st(this._cfg.state_entity) || "offline";
+      var pcOct   = this._st(this._cfg.pc_entity);
+      var pswOct  = this._st(this._cfg.psw_entity);
+      var sys     = this._st(this._cfg.system_entity) || "—";
+      var cpuMode = this._st(this._cfg.cpu_mode_entity);
 
       var running = cpu === "running";
       var offline = cpu === "offline" || cpu === "unavailable" || cpu === "unknown";
@@ -363,8 +467,38 @@
       var pcDisp  = pcOct  ? pcOct.replace(/^0+/, "")  || "0" : "——————";
       var pswDisp = pswOct ? pswOct.replace(/^0+/, "") || "0" : "——————";
 
-      // 16 LEDs in four groups of 4
-      var G = [4, 4, 4, 4];
+      // SR switch bits: SR21 (MSB, left) … SR0 (LSB, right)
+      var srBits = [];
+      for (var i = 21; i >= 0; i--) {
+        var srState = this._st(this._cfg.sr_prefix + i);
+        srBits.push(srState === "on" ? 1 : 0);
+      }
+      var srHasSensors = this._hass.states[this._cfg.sr_prefix + "0"] !== undefined;
+
+      // ADDR SELECT (top rotary): we always query EXAMINE PC = PROG PHY mode.
+      // Future: expose the actual knob position as an entity for dynamic selection.
+      var addrModes = [
+        { label: "P.PHY",  active: true  },
+        { label: "K.I",    active: false },
+        { label: "S.I",    active: false },
+        { label: "U.I",    active: false },
+        { label: "C.PHY",  active: false },
+        { label: "K.D",    active: false },
+        { label: "S.D",    active: false },
+        { label: "U.D",    active: false },
+      ];
+
+      // DATA SELECT (bottom rotary): we always query EXAMINE PSW = DISPLAY REGISTER.
+      var dataModes = [
+        { label: "D/P",  active: false },
+        { label: "BUS",  active: false },
+        { label: "FPP",  active: false },
+        { label: "DSP",  active: true  },
+      ];
+
+      // 16 LEDs in four groups of 4; SR in 6+6+6+4
+      var G4  = [4, 4, 4, 4];
+      var G22 = [6, 6, 6, 4];
 
       this.shadowRoot.innerHTML =
         "<style>" + CSS + "</style>" +
@@ -386,7 +520,7 @@
                 '<span class="rlabel">Address Register (PC)</span>' +
                 '<span class="rval rv-pc">' + pcDisp + "</span>" +
               "</div>" +
-              ledRow(pcBits, G, "adr") +
+              ledRow(pcBits, G4, "adr") +
             "</div>" +
 
             '<div class="regrow">' +
@@ -394,8 +528,22 @@
                 '<span class="rlabel">Data Register (PSW)</span>' +
                 '<span class="rval rv-ps">' + pswDisp + "</span>" +
               "</div>" +
-              ledRow(pswBits, G, "dat") +
+              ledRow(pswBits, G4, "dat") +
             "</div>" +
+
+            selRow("ADDR", addrModes) +
+            selRow("DATA", dataModes) +
+
+            (srHasSensors
+              ? '<div class="regrow swrow">' +
+                  '<div class="rowhead">' +
+                    '<span class="rlabel">Switch Register (SR21 → SR0)</span>' +
+                    '<span class="rval"></span>' +
+                  "</div>" +
+                  swRow(srBits, G22) +
+                "</div>"
+              : "") +
+
           "</div>" +
 
           '<div class="bar">' +
@@ -409,16 +557,16 @@
                 '<div class="ilbl">PROC</div>' +
               "</div>" +
               '<div class="ind">' +
-                '<div class="idot"></div>' +
-                '<div class="ilbl">BUS</div>' +
+                '<div class="idot' + (cpuMode === "kernel" ? " on" : "") + '"></div>' +
+                '<div class="ilbl">KRNL</div>' +
               "</div>" +
               '<div class="ind">' +
-                '<div class="idot"></div>' +
-                '<div class="ilbl">PAR ERR</div>' +
+                '<div class="idot' + (cpuMode === "supervisor" ? " on" : "") + '"></div>' +
+                '<div class="ilbl">SUPV</div>' +
               "</div>" +
               '<div class="ind">' +
-                '<div class="idot"></div>' +
-                '<div class="ilbl">ADRS ERR</div>' +
+                '<div class="idot' + (cpuMode === "user" ? " on" : "") + '"></div>' +
+                '<div class="ilbl">USER</div>' +
               "</div>" +
             "</div>" +
           "</div>" +
@@ -437,8 +585,8 @@
     name: "PiDP-11 Front Panel",
     description:
       "Amber blinkenlight display for the PDP-11/70 emulator — " +
-      "live address LEDs (PC), data LEDs (PSW), run/halt lamp, and current OS. " +
-      "Animates at 20 Hz when the lamp stream is connected.",
+      "live address/data LEDs, switch register, rotary selector indicators, " +
+      "CPU mode, and OS name. Animates at 20 Hz when the lamp stream is connected.",
     preview: true,
     documentationURL: "https://github.com/dmz006/pidp11-hacs",
   });
