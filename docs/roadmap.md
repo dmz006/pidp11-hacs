@@ -84,10 +84,22 @@ resource guardrails.
 
 ## R6 — Remote-Pi topology
 
-Run HA on an Intel NUC and the PiDP-11 on a separate Pi 5. Integration
-targets the remote Pi over the network; no local add-on. Requires
-solving auth + latency for the remote-console protocol. Not in v1
-because the user confirmed the single-Pi target.
+Run HA on an Intel NUC (or any host) and the PiDP-11 on a separate Pi 5.
+Integration targets the remote Pi over the network; no local add-on required.
+
+The auth + discovery pattern is already solved by **ESPHome**: the Pi advertises
+itself via mDNS (`_pidp11._tcp.local`), HA auto-discovers it, and the user confirms
+with a shared secret — no IP addresses to copy. We already have the shared-secret
+mechanism in `config_flow.py` and the TCP remote-console socket. The delta is:
+
+- `run.sh`: advertise via `avahi-publish` or a small Python `zeroconf` call
+- `config_flow.py`: add a `zeroconf` discovery step (same pattern as ESPHome
+  and most network integrations)
+- Noise protocol encryption on the remote-console socket (optional but clean)
+
+The underlying PiDP-11 connectivity model (Pi as device, HA as controller,
+shared secret for auth) is structurally identical to ESPHome's model for ESP32s.
+Not in v1 because the user confirmed the single-Pi target.
 
 ## Priority order
 
