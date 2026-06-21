@@ -1,6 +1,6 @@
 [project]
 name = "pidp11-hacs"
-version = "0.0.0"
+version = "1.1.0"
 description = "Home Assistant add-on + HACS integration for the PiDP-11 PDP-11 emulator."
 readme = "README.md"
 requires-python = ">=3.12"
