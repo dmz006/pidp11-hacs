@@ -43,8 +43,11 @@ RUN cd src/02.3_simh/4.x+realcons/src \
  && make -f quickmake VIDEO_CCDEFS="" VIDEO_LDFLAGS="" DISPLAY_OPT=""
 
 # Build pidp1170_blinkenlightd + scansw (GPIO/lamp server, activated in S4)
+# scansw Makefile uses $(CC) which can default to a 32-bit ARM cross-compiler
+# on some builder environments; force the native aarch64 compiler explicitly.
+# scansw.c already supports Pi 5 via pinctrl/gpiochip_rp1.c — no source changes needed.
 RUN cd src/11_pidp_server/scanswitch \
- && make \
+ && make CC=gcc \
  && cd ../pidp11 \
  && MAKE_TARGET_ARCH=RPI make pidp1170_blinkenlightd
 

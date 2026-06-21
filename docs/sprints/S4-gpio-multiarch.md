@@ -27,10 +27,11 @@ is available for testing.
    when `ENABLE_GPIO=true`. `blinky` handled as a special case (patches
    `PDP-11xx.ini` separately, redirects `boot.ini` → patched copy). Boot.ini
    source files remain unchanged so container-only operation still works.
-4b. ⏳ **Boot-select encoder.** SR switch reading is wired (`scansw` → `getsel.sh`)
-   but `scansw` binary is 32-bit ARM (armhf), which fails on the aarch64 container and
-   Pi 5 host; also uses BCM2835 GPIO which doesn't exist on Pi 5. Needs rewrite or
-   Pi 5-compatible replacement. `sensor.pidp11_boot_select` HA entity deferred.
+4b. ⏳ **Boot-select encoder.** SR switch reading is wired (`scansw` → `getsel.sh`).
+   `scansw` was compiled as 32-bit ARM (armhf) due to the builder's default `CC`;
+   fixed in Dockerfile with `make CC=gcc` — scansw.c already supports Pi 5 via
+   `pinctrl/gpiochip_rp1.c` (no source changes needed). Needs image rebuild to verify.
+   `sensor.pidp11_boot_select` HA entity deferred to post-rebuild test.
 5. ⏳ **CI image build.** Build `linux/arm64` image, push to
    `ghcr.io/<owner>/pidp11-addon-aarch64:X.Y.Z` on tag. Deferred to v1.0.0 release.
 6. ⏳ **Hardware checklist.** Every v1 feature has a checklist entry in
@@ -48,7 +49,7 @@ is available for testing.
   - [x] SR register read via `EXAMINE SR` matches physical switches (all-down=000000, SW0-up=000001 confirmed Jun 21 2026; NOTE: use `EXAMINE SR` not `EXAMINE 177570` — latter reads through 2.11BSD MMU and gives wrong value)
   - [x] START/HALT switches change `sensor.pidp11_state` within 3 s (HALTED→RUNNING transition confirmed Jun 21 2026; polling at 3s interval)
   - [ ] Boot-select encoder changes `sensor.pidp11_boot_select`
-  - [ ] Cold-boot HAOS → emulator up and hat responsive in < 60 s
+  - [x] Cold-boot HAOS → emulator up and hat responsive in < 60 s (authshim t=14s, SimH RUNNING t=30s, Jun 21 2026)
 
 ## Exit gate
 
