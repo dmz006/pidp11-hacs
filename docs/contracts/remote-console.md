@@ -55,6 +55,52 @@ remote console, with these additions:
 | Trap vector taken  | `EVENT trap vec=<octal> pc=<octal>\n`             |
 | Physical switch    | `EVENT switch name=<name> state=<0\|1>\n`         |
 
+## Watch stream (port remote_console_port + 2)
+
+The auth shim exposes a second TCP port at `remote_console_port + 2` (default
+`2225`) for near-real-time SR (Switch Register) streaming.
+
+### Handshake
+
+Same as the main port:
+
+```
+AUTH <secret>\n
+```
+
+Server responds `OK\n` (or `DENY <reason>\n` on failure).
+
+### Stream events
+
+After `OK`, the server opens its own dedicated connection to SimH, drains the
+banner once, then polls `EXAMINE SR` every 250 ms (configurable via the
+`WATCH_INTERVAL_MS` environment variable).
+
+Whenever the SR value changes (and once immediately on connection), the server
+pushes:
+
+```
+EVENT sr value=<octal>\n
+```
+
+where `<octal>` is the 22-bit SR value in octal notation.
+
+The connection is long-lived. The client should reconnect on EOF or error.
+
+### Integration behaviour
+
+`PiDP11Coordinator` starts a background task (`_run_sr_watch`) that maintains
+this connection. On each `EVENT sr value=<octal>` line:
+
+- `pidp11_switch_changed` HA events are fired for each SR bit that changed
+  (payload: `{"switch": "SR<N>", "state": <bool>}`).
+- `pidp11_sr_changed` is fired with `{"sr_old": <octal>, "sr_new": <octal>}`.
+- `coordinator.data.sr` is updated immediately via `async_set_updated_data`.
+
+If the watch port is unavailable the coordinator falls back to the 5-second
+poll cycle (which also fires `pidp11_sr_changed` when the watch task is not
+running).
+
 ## Re-connection
 
 If the TCP connection drops, the integration's coordinator reopens

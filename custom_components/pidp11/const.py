@@ -36,3 +36,6 @@ CPU_MODE_SUPERVISOR: Final = "supervisor"
 CPU_MODE_USER: Final = "user"
 
 EVENT_SR_CHANGED: Final = "pidp11_sr_changed"
+EVENT_SWITCH_CHANGED: Final = "pidp11_switch_changed"
+
+WATCH_PORT_OFFSET: Final = 2

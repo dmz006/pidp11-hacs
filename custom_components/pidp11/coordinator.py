@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import timedelta
 
 from homeassistant.core import HomeAssistant
@@ -20,7 +20,9 @@ from .const import (
     CURRENT_SYSTEM_PATH,
     DOMAIN,
     EVENT_SR_CHANGED,
+    EVENT_SWITCH_CHANGED,
     UPDATE_INTERVAL_SECONDS,
+    WATCH_PORT_OFFSET,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -67,6 +69,8 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
         self.port = port
         self._secret = secret
         self._prev_sr: str | None = None
+        self._watch_port = port + WATCH_PORT_OFFSET
+        self._watch_task: asyncio.Task[None] | None = None
 
     # ── Public command API ────────────────────────────────────────────────────
 
@@ -93,12 +97,15 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
             raise UpdateFailed(f"PiDP-11 error: {exc}") from exc
 
         # Fire SR-changed event when the switch register value changes.
+        # Only fire from poll if watch task isn't active (legacy/fallback mode),
+        # to avoid duplicate events when the watch stream is running.
         new_sr = state.sr
         if new_sr is not None and self._prev_sr is not None and new_sr != self._prev_sr:
-            self.hass.bus.async_fire(
-                EVENT_SR_CHANGED,
-                {"sr_old": self._prev_sr, "sr_new": new_sr},
-            )
+            if self._watch_task is None or self._watch_task.done():
+                self.hass.bus.async_fire(
+                    EVENT_SR_CHANGED,
+                    {"sr_old": self._prev_sr, "sr_new": new_sr},
+                )
         if new_sr is not None:
             self._prev_sr = new_sr
 
@@ -205,6 +212,88 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
             return _strip_echo(cmd, text)
         finally:
             _close(writer)
+
+    # ── Watch stream ──────────────────────────────────────────────────────────
+
+    def start_sr_watch(self, task_name: str) -> None:
+        """Start the long-lived SR watch task (no-op if already running)."""
+        if self._watch_task and not self._watch_task.done():
+            return
+        self._watch_task = self.hass.async_create_background_task(
+            self._run_sr_watch(), name=task_name
+        )
+
+    def stop_sr_watch(self) -> None:
+        """Cancel the SR watch task."""
+        if self._watch_task:
+            self._watch_task.cancel()
+            self._watch_task = None
+
+    async def _run_sr_watch(self) -> None:
+        """Long-lived watch stream connection. Reconnects on failure."""
+        while True:
+            try:
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(self.host, self._watch_port),
+                    timeout=_CONNECT_TIMEOUT,
+                )
+                try:
+                    writer.write(f"AUTH {self._secret}\n".encode())
+                    await writer.drain()
+                    line = await asyncio.wait_for(reader.readline(), timeout=5.0)
+                    if not line.startswith(b"OK"):
+                        _LOGGER.debug(
+                            "SR watch: auth failed on port %s", self._watch_port
+                        )
+                        await asyncio.sleep(30.0)
+                        continue
+                    _LOGGER.debug("SR watch connected on port %s", self._watch_port)
+                    while True:
+                        line = await asyncio.wait_for(reader.readline(), timeout=60.0)
+                        if not line:
+                            break
+                        await self._handle_watch_line(
+                            line.decode(errors="replace").strip()
+                        )
+                finally:
+                    try:
+                        writer.close()
+                        await writer.wait_closed()
+                    except Exception:
+                        pass
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:
+                _LOGGER.debug(
+                    "SR watch disconnected: %s — retrying in 10 s", exc
+                )
+            await asyncio.sleep(10.0)
+
+    async def _handle_watch_line(self, msg: str) -> None:
+        """Process a line from the watch stream."""
+        if not msg.startswith("EVENT sr value="):
+            return
+        sr_new = msg.removeprefix("EVENT sr value=")
+        if not re.match(r"^[0-7]+$", sr_new):
+            return
+        sr_old = self._prev_sr
+        self._prev_sr = sr_new
+        if self.data is not None and sr_old is not None and sr_new != sr_old:
+            old_int = int(sr_old, 8)
+            new_int = int(sr_new, 8)
+            changed = old_int ^ new_int
+            for i in range(22):
+                if changed & (1 << i):
+                    self.hass.bus.async_fire(
+                        EVENT_SWITCH_CHANGED,
+                        {"switch": f"SR{i}", "state": bool(new_int & (1 << i))},
+                    )
+            self.hass.bus.async_fire(
+                EVENT_SR_CHANGED,
+                {"sr_old": sr_old, "sr_new": sr_new},
+            )
+        if self.data is not None:
+            self.async_set_updated_data(replace(self.data, sr=sr_new))
 
 
 # ── Module-level helpers ──────────────────────────────────────────────────────

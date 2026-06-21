@@ -46,6 +46,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PiDP11ConfigEntry) -> bo
     )
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
+    coordinator.start_sr_watch(f"{DOMAIN}_sr_watch")
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _register_services(hass, coordinator)
@@ -64,6 +65,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PiDP11ConfigEntry) -> bo
 
 async def async_unload_entry(hass: HomeAssistant, entry: PiDP11ConfigEntry) -> bool:
     """Unload a config entry."""
+    entry.runtime_data.stop_sr_watch()
     if hass.services.has_service(DOMAIN, SERVICE_HALT):
         hass.services.async_remove(DOMAIN, SERVICE_HALT)
         hass.services.async_remove(DOMAIN, SERVICE_CONTINUE)

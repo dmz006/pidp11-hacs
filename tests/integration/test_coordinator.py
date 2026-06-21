@@ -44,7 +44,17 @@ def test_construct() -> None:
 
     # PiDP11State should be a dataclass with the right fields.
     state_fields = {f.name for f in PiDP11State.__dataclass_fields__.values()}
-    assert {"cpu_state", "pc", "psw", "system"} == state_fields
+    assert {"cpu_state", "pc", "psw", "sr", "cpu_mode", "system"} == state_fields
+
+
+def test_parse_cpu_mode() -> None:
+    from custom_components.pidp11.coordinator import _parse_cpu_mode
+
+    assert _parse_cpu_mode("000014") == "kernel"      # bits 15-14 = 00
+    assert _parse_cpu_mode("040000") == "supervisor"  # bits 15-14 = 01
+    assert _parse_cpu_mode("140000") == "user"        # bits 15-14 = 11
+    assert _parse_cpu_mode(None) is None
+    assert _parse_cpu_mode("invalid") is None
 
 
 @pytest.mark.xfail(reason="requires HA test harness — pending S3 integration tests", strict=True)
