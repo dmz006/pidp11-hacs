@@ -1,14 +1,55 @@
 # syntax=docker/dockerfile:1.7
-# Pre-built aarch64 binaries from obsolescence/pidp11 (Dec 2024 build).
-# Source build is deferred — see docs/sprints/S1-addon-emulator.md task 1.
-ARG BUILD_FROM=ghcr.io/home-assistant/aarch64-base-debian:bookworm
-FROM ${BUILD_FROM}
+# Multi-stage build — compiles SimH + blinkenlightd from source.
+#
+# Upstream: https://github.com/obsolescence/pidp11
+# Pinned SHA: b814664dc8b35203bd1052949eaaa969bfff74e2 (Dec 2024)
+#
+# Build (requires arm64 platform — use docker buildx on x86_64 with QEMU,
+# or build natively on the Pi):
+#   docker buildx build --platform linux/arm64 -t pidp11-addon .
 
-# Runtime deps for pdp11_realcons.
-# libsdl2: binary links it; headless via SDL_VIDEODRIVER=offscreen + SDL_AUDIODRIVER=dummy.
+ARG BUILD_FROM=ghcr.io/home-assistant/aarch64-base-debian:bookworm
+
+# ── Stage 1: builder ─────────────────────────────────────────────────────────
+FROM ${BUILD_FROM} AS builder
+
+ARG PIDP11_SHA=b814664dc8b35203bd1052949eaaa969bfff74e2
+
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-        libsdl2-2.0-0 \
+        build-essential \
+        git \
+        ca-certificates \
+        libpcap-dev \
+        libreadline-dev \
+        libtirpc-dev \
+        rpcbind \
+ && rm -rf /var/lib/apt/lists/*
+
+# Intentionally no libsdl2-dev: quickmake auto-detects SDL2 and skips it,
+# producing a headless binary without the X11/audio dependency chain.
+
+WORKDIR /build
+RUN git clone --depth 1 https://github.com/obsolescence/pidp11.git . \
+ && git fetch --depth 1 origin "${PIDP11_SHA}" \
+ && git checkout "${PIDP11_SHA}"
+
+# Build pdp11_realcons (SimH + realcons patch)
+RUN cd src/02.3_simh/4.x+realcons/src \
+ && make -f quickmake
+
+# Build pidp1170_blinkenlightd (GPIO/lamp server, used in S4)
+RUN cd src/11_pidp_server/scanswitch \
+ && make \
+ && cd ../pidp11 \
+ && MAKE_TARGET_ARCH=RPI make pidp1170_blinkenlightd
+
+# ── Stage 2: runtime ─────────────────────────────────────────────────────────
+FROM ${BUILD_FROM}
+
+# Runtime deps — notably no SDL2 since the builder compiled without it.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
         libpcap0.8 \
         libreadline8 \
         libtirpc3 \
@@ -18,21 +59,24 @@ RUN apt-get update \
         xz-utils \
  && rm -rf /var/lib/apt/lists/*
 
-# Pre-built aarch64 binaries (Dec 2024).
-# pidp1170_blinkenlightd and scansw are staged here for S4 (GPIO sprint).
-COPY bin/pdp11_realcons         /opt/pidp11/bin/pdp11_realcons
-COPY bin/pidp1170_blinkenlightd /opt/pidp11/bin/pidp1170_blinkenlightd
-COPY bin/scansw                 /opt/pidp11/bin/scansw
+# Binaries from builder
+COPY --from=builder \
+    /build/src/02.3_simh/4.x+realcons/bin-rpi/pdp11_realcons \
+    /opt/pidp11/bin/pdp11_realcons
+COPY --from=builder \
+    /build/src/11_pidp_server/pidp11/bin-rpi/pidp1170_blinkenlightd \
+    /opt/pidp11/bin/pidp1170_blinkenlightd
+COPY --from=builder \
+    /build/src/11_pidp_server/scanswitch/scansw \
+    /opt/pidp11/bin/scansw
 RUN chmod 755 /opt/pidp11/bin/pdp11_realcons \
               /opt/pidp11/bin/pidp1170_blinkenlightd \
               /opt/pidp11/bin/scansw
 
-# Bundled systems.
-# idled + blinky: RAM-only, no disk image needed.
-# 211bsd: boot.ini only; disk image downloaded to /share/pidp11/disks/ at first start.
+# Bundled systems: idled + blinky (RAM-only); 211bsd boot.ini only (disk downloaded at runtime).
 COPY systems/ /opt/pidp11/systems/
 
-# Helper scripts
+# Scripts
 COPY getsel.sh   /opt/pidp11/bin/getsel.sh
 COPY authshim.py /opt/pidp11/bin/authshim.py
 COPY run.sh      /run.sh

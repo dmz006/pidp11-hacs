@@ -35,3 +35,15 @@ Thumbs.db
 
 # Keep Claude-local memory store out of the repo
 .claude/
+
+# datawatch-managed (BL219)
+.aider.conf.yml
+.aider.chat.history.md
+.aider.tags.cache.v*/
+
+# datawatch-managed (BL219)
+.goose/
+
+# datawatch-managed (BL219)
+.gemini/
+pidp11-addon/bin/
