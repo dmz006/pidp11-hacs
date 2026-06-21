@@ -1,23 +1,17 @@
 /**
  * PiDP-11 Front Panel — Lovelace custom card.
  *
- * Renders an amber-on-dark blinkenlight panel showing the PDP-11/70 CPU
- * registers and front-panel switch state from the PiDP-11 HA integration.
+ * Faithfully replicates the PDP-11/70 front panel layout:
+ *   Row 1: Status indicators (PAR ERR, ADRS ERR, RUN, PAUSE, MASTER |
+ *                              USER, SUPER, KERNEL, DATA | ADDRESSING 16/18/22)
+ *   Row 2: ADDRESS — 22 LEDs under a dark-red segment bar
+ *   Row 3: DATA    — PARITY H/L + 16 LEDs under a dark-purple segment bar
+ *   Row 4: Switch Register — 22 toggle-style switches, alternating octal groups
+ *   Row 5: ADDR SELECT / DATA SELECT rotary position indicators
+ *   Footer: System name + control switch buttons
  *
- * Live animation: subscribes to pidp11_lamps HA events fired by the
- * coordinator's lamp watch task (port 2226, 20 Hz poll of EXAMINE PC/PSW).
- * LED state is updated via requestAnimationFrame without rebuilding the DOM.
- *
- * Lovelace config example:
- *   type: custom:pidp11-panel-card
- *
- * Optional overrides (entity IDs are auto-detected by default):
- *   state_entity:     sensor.pidp11_cpu_state
- *   pc_entity:        sensor.pidp11_pc
- *   psw_entity:       sensor.pidp11_psw
- *   system_entity:    sensor.pidp11_system
- *   sr_prefix:        binary_sensor.pidp11_sr   (appended with 0..21)
- *   cpu_mode_entity:  sensor.pidp11_cpu_mode
+ * Live animation at 20 Hz via pidp11_lamps HA events (lamp watch port 2226).
+ * LED updates use requestAnimationFrame without rebuilding innerHTML.
  */
 
 (function () {
@@ -25,314 +19,203 @@
 
   if (customElements.get("pidp11-panel-card")) return;
 
-  // ── Bit helpers ──────────────────────────────────────────────────────────────
+  // ── Bit helpers ────────────────────────────────────────────────────────────
 
-  function octalToInt(s) {
-    return s ? parseInt(s, 8) : 0;
-  }
+  function octalToInt(s) { return s ? parseInt(s, 8) : 0; }
 
-  // n → bit array of `len` bits, MSB first
   function intToBits(n, len) {
-    const bits = [];
-    for (let i = len - 1; i >= 0; i--) bits.push((n >>> i) & 1);
+    var bits = [];
+    for (var i = len - 1; i >= 0; i--) bits.push((n >>> i) & 1);
     return bits;
   }
 
-  // Render a row of LEDs with a type class for targeted querySelectorAll.
-  // groups = array of counts per group, e.g. [4,4,4,4].
-  // cls = extra class added to each LED span (e.g. 'adr' or 'dat').
+  // LED row. cls = type class ('adr' or 'dat') used by _updateLeds querySelectorAll.
   function ledRow(bits, groups, cls) {
-    let html = '<div class="leds">';
-    let idx = 0;
+    var html = '<div class="leds">';
+    var idx = 0;
     groups.forEach(function (count, gi) {
       if (gi > 0) html += '<span class="sep"></span>';
-      for (let k = 0; k < count; k++, idx++) {
-        html += '<span class="led ' + cls + " " + (bits[idx] ? "on" : "off") + '"></span>';
+      for (var k = 0; k < count; k++, idx++) {
+        html += '<span class="led ' + cls + ' ' + (bits[idx] ? 'on' : 'off') + '"></span>';
       }
     });
-    return html + "</div>";
+    return html + '</div>';
   }
 
-  // Render a row of switch indicators (SR bits), MSB-first.
-  // groups = array of counts per group, e.g. [6,6,6,4].
+  // SR toggle-switch row. Groups alternate two colors (octal-digit bands).
   function swRow(bits, groups) {
-    let html = '<div class="sws">';
-    let idx = 0;
+    var html = '<div class="swrow">';
+    var idx = 0;
     groups.forEach(function (count, gi) {
       if (gi > 0) html += '<span class="sep"></span>';
-      for (let k = 0; k < count; k++, idx++) {
-        html += '<span class="sw ' + (bits[idx] ? "on" : "off") + '"></span>';
+      var gc = (gi % 2 === 0) ? 'ga' : 'gb';
+      for (var k = 0; k < count; k++, idx++) {
+        html += '<span class="sw ' + gc + ' ' + (bits[idx] ? 'on' : 'off') + '"></span>';
       }
     });
-    return html + "</div>";
+    return html + '</div>';
   }
 
-  // Render a rotary selector indicator row.
-  // modes = array of {label, active} objects.
-  function selRow(label, modes) {
-    let dots = modes.map(function (m) {
-      return (
-        '<div class="selitem">' +
-          '<div class="seldot' + (m.active ? " on" : "") + '"></div>' +
-          '<div class="sellbl">' + m.label + "</div>" +
-        "</div>"
-      );
-    }).join("");
-    return (
-      '<div class="selrow">' +
-        '<span class="selhdr">' + label + "</span>" +
-        '<div class="selmodes">' + dots + "</div>" +
-      "</div>"
-    );
+  // Bit-number labels above the SR switch row (all 22 numbers shown).
+  function bitNums(totalBits, groups) {
+    var html = '<div class="bitnums">';
+    var idx = 0;
+    groups.forEach(function (count, gi) {
+      if (gi > 0) html += '<span class="bnsep"></span>';
+      for (var k = 0; k < count; k++, idx++) {
+        html += '<span class="bitnum">' + (totalBits - 1 - idx) + '</span>';
+      }
+    });
+    return html + '</div>';
   }
 
-  // ── Styles ───────────────────────────────────────────────────────────────────
+  // Single status-indicator LED with label below.
+  function si(on, lbl) {
+    return '<div class="si"><div class="sdot ' + (on ? 'on' : 'off') +
+           '"></div><div class="slbl">' + lbl + '</div></div>';
+  }
 
-  var CSS = /* css */ `
-    :host { display: block; }
+  // Rotary selector row.
+  function selRow(hdr, modes) {
+    var dots = modes.map(function (m) {
+      return '<div class="selitem"><div class="seldot' + (m.active ? ' on' : '') +
+             '"></div><div class="sellbl' + (m.active ? ' act' : '') + '">' +
+             m.label + '</div></div>';
+    }).join('');
+    return '<div class="selrow"><span class="selhdr">' + hdr +
+           '</span><div class="selmodes">' + dots + '</div></div>';
+  }
 
-    .card {
-      background: #111114;
-      border-radius: 10px;
-      overflow: hidden;
-      font-family: 'Courier New', Courier, monospace;
-      box-shadow: 0 6px 28px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,140,0,0.04);
-      user-select: none;
-    }
+  // ── CSS ────────────────────────────────────────────────────────────────────
 
-    /* ── Faceplate ── */
-    .face {
-      background: linear-gradient(175deg, #1e1e22 0%, #141418 100%);
-      padding: 14px 18px 13px;
-      border-bottom: 1px solid #0b0b0e;
-    }
+  var CSS = [
+    ':host{display:block}',
 
-    .topbar {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      margin-bottom: 14px;
-    }
+    '.card{',
+      'background:#1a0d0d;',
+      'border-radius:8px;',
+      'overflow:hidden;',
+      "font-family:'Helvetica Neue',Arial,sans-serif;",
+      'box-shadow:0 6px 28px rgba(0,0,0,.75),0 0 0 1px rgba(80,10,10,.35);',
+      'user-select:none',
+    '}',
 
-    .brand .name {
-      margin: 0;
-      font-size: 14px;
-      font-weight: 700;
-      letter-spacing: 4px;
-      color: #c0c0c8;
-      text-transform: uppercase;
-    }
-    .brand .sub {
-      margin: 3px 0 0;
-      font-size: 8px;
-      letter-spacing: 2px;
-      color: #606072;
-      text-transform: uppercase;
-    }
+    /* Header */
+    '.hdr{',
+      'padding:10px 16px 8px;',
+      'display:flex;',
+      'justify-content:space-between;',
+      'align-items:center;',
+      'border-bottom:1px solid #2d0f0f',
+    '}',
+    '.logo{font-size:17px;font-style:italic;font-weight:300;color:#d8d0d0;letter-spacing:1px}',
+    '.logo strong{font-style:normal;font-weight:700;color:#ffffff}',
+    '.hdr-r{display:flex;flex-direction:column;align-items:flex-end;gap:1px}',
+    '.sysval{font-size:12px;color:#ff5520;font-family:"Courier New",monospace;letter-spacing:1px}',
+    '.cpustate{font-size:6.5px;letter-spacing:2px;text-transform:uppercase}',
+    '.cpustate.run{color:#dd4400}',
+    '.cpustate.halt{color:#886060}',
+    '.cpustate.off{color:#664444}',
 
-    /* ── RUN lamp ── */
-    .runlamp {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 4px;
-    }
-    .runlamp .dot {
-      width: 16px;
-      height: 16px;
-      border-radius: 50%;
-      border: 1px solid #1a0a00;
-    }
-    .runlamp.running .dot {
-      background: radial-gradient(circle at 36% 36%, #ffd080, #ff8c00);
-      box-shadow: 0 0 8px #ff8c00, 0 0 20px rgba(255,140,0,0.25);
-    }
-    .runlamp.halted .dot  { background: #200f00; }
-    .runlamp.offline .dot { background: #111; border-color: #1c1c1c; }
-    .runlamp .dlabel {
-      font-size: 8px;
-      letter-spacing: 2px;
-      color: #606072;
-      text-transform: uppercase;
-    }
-    .runlamp.running .dlabel { color: #9a6020; }
+    /* Faceplate body */
+    '.face{padding:10px 16px 14px;display:flex;flex-direction:column;gap:9px}',
 
-    /* ── Register rows ── */
-    .regrow { margin-bottom: 11px; }
-    .regrow:last-child { margin-bottom: 0; }
+    /* Status indicator row */
+    '.statrow{display:flex;align-items:flex-end;gap:0}',
+    '.sigrp{display:flex;align-items:flex-end;gap:5px}',
+    '.sigrp+.sigrp{margin-left:8px;padding-left:8px;border-left:1px solid #2d0f0f}',
+    '.si{display:flex;flex-direction:column;align-items:center;gap:3px}',
+    '.sdot{width:8px;height:8px;border-radius:50%;border:1px solid #2a0808}',
+    '.sdot.on{background:radial-gradient(circle at 35% 35%,#ff7040,#ff2e00);',
+             'box-shadow:0 0 4px #ff2e00,0 0 8px rgba(255,46,0,.35)}',
+    '.sdot.off{background:#3d1010}',
+    '.slbl{font-size:5.5px;color:#c8b8b8;text-transform:uppercase;letter-spacing:.3px;white-space:nowrap}',
+    /* Addressing sub-group (label above) */
+    '.amgrp{display:flex;flex-direction:column;align-items:center}',
+    '.amlbl{font-size:4.5px;color:#b0a0a0;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px}',
+    '.aminner{display:flex;gap:5px}',
 
-    .rowhead {
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-      margin-bottom: 5px;
-    }
-    .rowhead .rlabel {
-      font-size: 8px;
-      letter-spacing: 2px;
-      color: #686878;
-      text-transform: uppercase;
-    }
-    .rowhead .rval {
-      font-size: 11px;
-      color: #9a6030;
-      letter-spacing: 1px;
-    }
+    /* Segment bars */
+    '.segbar{height:5px;border-radius:1px;margin-bottom:3px}',
+    '.segbar.addr{background:#7e1e1e}',
+    '.segbar.data{background:#42185a}',
 
-    /* ── LEDs ── */
-    .leds {
-      display: flex;
-      align-items: center;
-      gap: 3px;
-    }
-    .led {
-      display: inline-block;
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      border: 1px solid #140800;
-      flex-shrink: 0;
-    }
-    .led.on {
-      background: radial-gradient(circle at 34% 34%, #ffd080, #ff8c00);
-      box-shadow: 0 0 6px #ff8c00;
-    }
-    .led.off { background: #1a0a00; }
+    /* Register rows */
+    '.regrow{display:flex;flex-direction:column}',
+    '.reginner{display:flex;align-items:center;gap:8px}',
+    '.regright{display:flex;flex-direction:column;align-items:flex-end;margin-left:auto;flex-shrink:0;gap:1px}',
+    '.rlbl{font-size:7px;color:#d0c0c0;text-transform:uppercase;letter-spacing:2px}',
+    '.rval{font-size:10px;font-family:"Courier New",monospace;color:#ff5520;letter-spacing:1px}',
 
-    /* ── SR switches ── */
-    .swrow { margin-top: 10px; }
-    .sws {
-      display: flex;
-      align-items: center;
-      gap: 2px;
-    }
-    .sw {
-      display: inline-block;
-      width: 7px;
-      height: 11px;
-      border-radius: 2px;
-      border: 1px solid #1a0900;
-      flex-shrink: 0;
-    }
-    .sw.on  { background: #cc5500; box-shadow: 0 0 3px #cc5500; }
-    .sw.off { background: #190900; }
+    /* LEDs */
+    '.leds{display:flex;align-items:center;gap:3px}',
+    '.led{display:inline-block;width:9px;height:9px;border-radius:50%;border:1px solid #1a0606;flex-shrink:0}',
+    '.led.on{background:radial-gradient(circle at 33% 33%,#ff7050,#ff2e00);',
+            'box-shadow:0 0 5px #ff2e00,0 0 10px rgba(255,46,0,.28)}',
+    '.led.off{background:#3d1010}',
+    '.sep{display:inline-block;width:5px;flex-shrink:0}',
 
-    .sep {
-      display: inline-block;
-      width: 5px;
-      flex-shrink: 0;
-    }
+    /* Parity group (DATA row, far left) */
+    '.pargrp{display:flex;flex-direction:column;align-items:center;gap:2px;flex-shrink:0}',
+    '.pardots{display:flex;gap:3px}',
+    '.pardot{width:7px;height:7px;border-radius:50%;background:#2a0a0a;border:1px solid #1a0606}',
+    '.parhl{display:flex;gap:3px}',
+    '.parhl span{font-size:4.5px;color:#b0a0a0;width:7px;text-align:center}',
+    '.parlbl{font-size:5px;color:#b0a0a0;text-transform:uppercase;letter-spacing:.5px}',
 
-    /* ── Rotary selector indicator rows ── */
-    .selrow {
-      display: flex;
-      align-items: flex-start;
-      gap: 6px;
-      margin-top: 9px;
-    }
-    .selhdr {
-      font-size: 6px;
-      letter-spacing: 1px;
-      color: #505060;
-      text-transform: uppercase;
-      min-width: 28px;
-      padding-top: 5px;
-    }
-    .selmodes {
-      display: flex;
-      gap: 4px;
-      flex-wrap: wrap;
-    }
-    .selitem {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 2px;
-    }
-    .seldot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: #190b00;
-      border: 1px solid #1a0900;
-    }
-    .seldot.on {
-      background: #ff8c00;
-      box-shadow: 0 0 3px #ff8c00;
-    }
-    .sellbl {
-      font-size: 5.5px;
-      color: #505060;
-      text-transform: uppercase;
-      letter-spacing: 0.3px;
-      text-align: center;
-      white-space: nowrap;
-    }
-    .selitem .sellbl.active { color: #9a6020; }
+    /* SR switch section */
+    '.srsec{display:flex;flex-direction:column;gap:2px}',
+    /* Bit-number labels */
+    '.bitnums{display:flex;align-items:center;gap:3px}',
+    '.bitnum{display:inline-block;width:8px;font-size:5px;color:#c0b0b0;',
+            'text-align:center;flex-shrink:0;font-family:"Courier New",monospace}',
+    '.bnsep{display:inline-block;width:5px;flex-shrink:0}',
+    /* Toggle switches */
+    '.swrow{display:flex;align-items:center;gap:3px}',
+    '.sw{display:inline-block;width:8px;height:18px;border-radius:2px 2px 1px 1px;',
+        'position:relative;flex-shrink:0}',
+    '.sw::after{content:"";position:absolute;left:1px;width:6px;height:4px;',
+               'border-radius:1px;background:rgba(228,192,180,.55)}',
+    '.sw.on::after{top:1px}',
+    '.sw.off::after{bottom:1px}',
+    '.sw.ga{background:linear-gradient(to bottom,#c83020,#781010)}',
+    '.sw.ga.off{background:linear-gradient(to bottom,#601010,#380808)}',
+    '.sw.gb{background:linear-gradient(to bottom,#8a1018,#4e080c)}',
+    '.sw.gb.off{background:linear-gradient(to bottom,#440810,#280406)}',
 
-    /* ── Bottom bar ── */
-    .bar {
-      background: #0e0e11;
-      padding: 10px 18px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
+    /* Rotary selector indicators */
+    '.selsec{display:flex;flex-direction:column;gap:5px}',
+    '.selrow{display:flex;align-items:flex-start;gap:5px}',
+    '.selhdr{font-size:6px;color:#c0b0b0;text-transform:uppercase;letter-spacing:.5px;',
+            'min-width:28px;padding-top:4px;flex-shrink:0}',
+    '.selmodes{display:flex;gap:4px;flex-wrap:wrap}',
+    '.selitem{display:flex;flex-direction:column;align-items:center;gap:2px}',
+    '.seldot{width:6px;height:6px;border-radius:50%;background:#2a0808;border:1px solid #1a0606}',
+    '.seldot.on{background:#ff2e00;box-shadow:0 0 3px #ff2e00}',
+    '.sellbl{font-size:5.5px;color:#b0a0a0;text-transform:uppercase;white-space:nowrap}',
+    '.sellbl.act{color:#ff6040}',
 
-    .sysinfo .syslbl {
-      font-size: 8px;
-      letter-spacing: 2px;
-      color: #505060;
-      text-transform: uppercase;
-      margin-bottom: 2px;
-    }
-    .sysinfo .sysval {
-      font-size: 13px;
-      color: #ff8c00;
-      letter-spacing: 1px;
-    }
+    /* Footer bar */
+    '.bar{background:#110808;border-top:1px solid #2d0f0f;padding:8px 16px;',
+         'display:flex;align-items:center;gap:10px}',
+    '.barsys{display:flex;flex-direction:column;gap:1px;flex-shrink:0}',
+    '.barsyslbl{font-size:6px;color:#c0b0b0;text-transform:uppercase;letter-spacing:1px}',
+    '.barsysval{font-size:12px;color:#ff5520;font-family:"Courier New",monospace}',
+    '.ctrlrow{display:flex;gap:3px;align-items:center;margin-left:auto;flex-wrap:wrap;justify-content:flex-end}',
+    '.cbtn{font-size:5.5px;color:#d8c0c0;text-transform:uppercase;letter-spacing:.4px;',
+          'padding:2px 4px;border-radius:2px;background:#5a1010;white-space:nowrap}',
+    '.cbtn.act{background:#b01808;color:#fff}',
+  ].join('');
 
-    .indrow {
-      display: flex;
-      gap: 12px;
-    }
-    .ind {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 3px;
-    }
-    .ind .idot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #190b00;
-      border: 1px solid #140800;
-    }
-    .ind .idot.on {
-      background: #ff8c00;
-      box-shadow: 0 0 4px #ff8c00;
-    }
-    .ind .ilbl {
-      font-size: 7px;
-      letter-spacing: 1px;
-      color: #505060;
-      text-transform: uppercase;
-      white-space: nowrap;
-    }
-  `;
-
-  // ── Card class ────────────────────────────────────────────────────────────────
+  // ── Card element ───────────────────────────────────────────────────────────
 
   var PiDP11PanelCard = (function () {
+
     function PiDP11PanelCard() {
       this.attachShadow({ mode: "open" });
-      // Live register state — updated by lamp events (20 Hz) and entity state (5 s)
       this._livePC  = 0;
       this._livePSW = 0;
-      // Promise returned by hass.connection.subscribeEvents(); null until subscribed
       this._lampSub = null;
-      // requestAnimationFrame ID for pending LED repaint; null when idle
       this._rafId   = null;
     }
 
@@ -350,244 +233,234 @@
       };
     };
 
-    PiDP11PanelCard.prototype.getCardSize = function () { return 5; };
+    PiDP11PanelCard.prototype.getCardSize = function () { return 6; };
 
     PiDP11PanelCard.prototype.disconnectedCallback = function () {
-      // Unsubscribe from lamp events when the card is removed from the DOM
       if (this._lampSub) {
-        Promise.resolve(this._lampSub).then(function (unsub) {
-          try { unsub && unsub(); } catch (e) {}
-        });
+        Promise.resolve(this._lampSub).then(function (u) { try { u && u(); } catch (e) {} });
         this._lampSub = null;
       }
-      if (this._rafId) {
-        cancelAnimationFrame(this._rafId);
-        this._rafId = null;
-      }
+      if (this._rafId) { cancelAnimationFrame(this._rafId); this._rafId = null; }
     };
 
     Object.defineProperty(PiDP11PanelCard.prototype, "hass", {
       set: function (hass) {
         this._hass = hass;
-
-        // Subscribe to pidp11_lamps events exactly once per card instance.
-        // The event is fired by coordinator._handle_lamp_line at 20 Hz when
-        // the lamp watch task (port 2226) is connected.
         if (!this._lampSub) {
           var self = this;
           this._lampSub = hass.connection.subscribeEvents(
-            function (ev) { self._onLamp(ev); },
-            "pidp11_lamps"
+            function (ev) { self._onLamp(ev); }, "pidp11_lamps"
           );
         }
-
-        // Seed live register state from entity state.
-        // This gives correct initial values before any lamp events arrive
-        // and acts as a 5 s fallback if the lamp stream is unavailable.
         var pcOct  = this._st(this._cfg.pc_entity);
         var pswOct = this._st(this._cfg.psw_entity);
         if (pcOct  !== null) this._livePC  = octalToInt(pcOct);
         if (pswOct !== null) this._livePSW = octalToInt(pswOct);
-
         this._update();
       },
     });
 
     PiDP11PanelCard.prototype._st = function (id) {
-      return this._hass && this._hass.states[id]
-        ? this._hass.states[id].state
-        : null;
+      return this._hass && this._hass.states[id] ? this._hass.states[id].state : null;
     };
 
-    // Fast path: called by RAF after a lamp event updates _livePC/_livePSW.
-    // Updates only the LED class names and value text — does not rebuild innerHTML.
+    // Fast path — only update LED class names and octal value text.
+    // ADDRESS row uses 22 bits (PC zero-extended to PROG PHY 22-bit).
     PiDP11PanelCard.prototype._updateLeds = function () {
       var root = this.shadowRoot;
       if (!root) return;
-
-      var adrLeds = root.querySelectorAll(".adr");
-      var datLeds = root.querySelectorAll(".dat");
-      var pcBits  = intToBits(this._livePC,  16);
-      var pswBits = intToBits(this._livePSW, 16);
-
-      for (var i = 0; i < adrLeds.length; i++) {
-        adrLeds[i].className = "led adr " + (pcBits[i] ? "on" : "off");
-      }
-      for (var j = 0; j < datLeds.length; j++) {
-        datLeds[j].className = "led dat " + (pswBits[j] ? "on" : "off");
-      }
-
-      // Update the octal value displays alongside the LEDs
-      var pcEl  = root.querySelector(".rv-pc");
-      var psEl  = root.querySelector(".rv-ps");
-      if (pcEl)  pcEl.textContent  = this._livePC.toString(8).replace(/^0+/, "")  || "0";
-      if (psEl)  psEl.textContent  = this._livePSW.toString(8).replace(/^0+/, "") || "0";
+      var adr  = root.querySelectorAll(".adr");
+      var dat  = root.querySelectorAll(".dat");
+      var pcB  = intToBits(this._livePC,  22);
+      var pswB = intToBits(this._livePSW, 16);
+      for (var i = 0; i < adr.length;  i++) adr[i].className  = "led adr "  + (pcB[i]  ? "on" : "off");
+      for (var j = 0; j < dat.length;  j++) dat[j].className  = "led dat "  + (pswB[j] ? "on" : "off");
+      var ep = root.querySelector(".rv-pc");
+      var ed = root.querySelector(".rv-ps");
+      if (ep) ep.textContent = this._livePC.toString(8).padStart(6, "0");
+      if (ed) ed.textContent = this._livePSW.toString(8).padStart(6, "0");
     };
 
-    // Lamp event handler — fires on pidp11_lamps HA events at up to 20 Hz.
     PiDP11PanelCard.prototype._onLamp = function (ev) {
       var d = ev.data;
       if (!d) return;
-      var pc  = (d.address !== undefined) ? parseInt(d.address, 8) : this._livePC;
-      var ps  = (d.data    !== undefined) ? parseInt(d.data,    8) : this._livePSW;
+      var pc  = d.address !== undefined ? parseInt(d.address, 8) : this._livePC;
+      var ps  = d.data    !== undefined ? parseInt(d.data,    8) : this._livePSW;
       if (pc === this._livePC && ps === this._livePSW) return;
       this._livePC  = pc;
       this._livePSW = ps;
-      // Coalesce rapid events: only schedule one RAF at a time
       if (this._rafId) return;
       var self = this;
-      this._rafId = requestAnimationFrame(function () {
-        self._rafId = null;
-        self._updateLeds();
-      });
+      this._rafId = requestAnimationFrame(function () { self._rafId = null; self._updateLeds(); });
     };
 
-    // Slow path: full innerHTML rebuild on every hass update (5 s cadence).
-    // Uses _livePC/_livePSW (updated by lamp events) for LED state so the
-    // full render is always consistent with the live animation state.
+    // Full DOM rebuild — runs at 5 s entity-update cadence.
     PiDP11PanelCard.prototype._update = function () {
       if (!this._cfg || !this._hass) return;
 
       var cpu     = this._st(this._cfg.state_entity) || "offline";
-      var pcOct   = this._st(this._cfg.pc_entity);
-      var pswOct  = this._st(this._cfg.psw_entity);
       var sys     = this._st(this._cfg.system_entity) || "—";
-      var cpuMode = this._st(this._cfg.cpu_mode_entity);
+      var mode    = this._st(this._cfg.cpu_mode_entity);
 
       var running = cpu === "running";
       var offline = cpu === "offline" || cpu === "unavailable" || cpu === "unknown";
 
-      var lampCls = offline ? "offline" : running ? "running" : "halted";
-      var lampTxt = offline ? "OFFLN" : running ? "RUN" : "HALT";
+      var stLbl = offline ? "OFFLINE" : running ? "RUNNING" : "HALTED";
+      var stCls = offline ? "off"     : running ? "run"     : "halt";
 
-      var pcBits  = intToBits(this._livePC,  16);
-      var pswBits = intToBits(this._livePSW, 16);
+      var pcB   = intToBits(this._livePC,  22);
+      var pswB  = intToBits(this._livePSW, 16);
+      var pcD   = this._livePC.toString(8).padStart(6, "0");
+      var pswD  = this._livePSW.toString(8).padStart(6, "0");
 
-      // Display text: show entity value when available, em-dashes when offline
-      var pcDisp  = pcOct  ? pcOct.replace(/^0+/, "")  || "0" : "——————";
-      var pswDisp = pswOct ? pswOct.replace(/^0+/, "") || "0" : "——————";
-
-      // SR switch bits: SR21 (MSB, left) … SR0 (LSB, right)
-      var srBits = [];
-      for (var i = 21; i >= 0; i--) {
-        var srState = this._st(this._cfg.sr_prefix + i);
-        srBits.push(srState === "on" ? 1 : 0);
+      // SR: bit 21 (MSB) = left, bit 0 (LSB) = right
+      var srB = [];
+      for (var b = 21; b >= 0; b--) {
+        var sv = this._st(this._cfg.sr_prefix + b);
+        srB.push(sv === "on" ? 1 : 0);
       }
-      var srHasSensors = this._hass.states[this._cfg.sr_prefix + "0"] !== undefined;
+      var srHas = !!this._hass.states[this._cfg.sr_prefix + "0"];
 
-      // ADDR SELECT (top rotary): we always query EXAMINE PC = PROG PHY mode.
-      // Future: expose the actual knob position as an entity for dynamic selection.
+      // Groups: [1,3,3,3,3,3,3,3] = 22 bits in "octal+1" grouping
+      var G22 = [1, 3, 3, 3, 3, 3, 3, 3];
+      var G16 = [4, 4, 4, 4];
+
+      // ADDR SELECT: always PROG PHY (we always EXAMINE PC = program virtual addr)
       var addrModes = [
-        { label: "P.PHY",  active: true  },
-        { label: "K.I",    active: false },
-        { label: "S.I",    active: false },
-        { label: "U.I",    active: false },
-        { label: "C.PHY",  active: false },
-        { label: "K.D",    active: false },
-        { label: "S.D",    active: false },
-        { label: "U.D",    active: false },
+        { label:"P.PHY", active:true  }, { label:"K.I",   active:false },
+        { label:"S.I",   active:false }, { label:"U.I",   active:false },
+        { label:"C.PHY", active:false }, { label:"K.D",   active:false },
+        { label:"S.D",   active:false }, { label:"U.D",   active:false },
       ];
-
-      // DATA SELECT (bottom rotary): we always query EXAMINE PSW = DISPLAY REGISTER.
+      // DATA SELECT: always DISPLAY REGISTER (we always EXAMINE PSW)
       var dataModes = [
-        { label: "D/P",  active: false },
-        { label: "BUS",  active: false },
-        { label: "FPP",  active: false },
-        { label: "DSP",  active: true  },
+        { label:"D/P",  active:false }, { label:"BUS",  active:false },
+        { label:"FPP",  active:false }, { label:"DSP",  active:true  },
       ];
-
-      // 16 LEDs in four groups of 4; SR in 6+6+6+4
-      var G4  = [4, 4, 4, 4];
-      var G22 = [6, 6, 6, 4];
 
       this.shadowRoot.innerHTML =
         "<style>" + CSS + "</style>" +
         '<div class="card">' +
-          '<div class="face">' +
-            '<div class="topbar">' +
-              '<div class="brand">' +
-                '<div class="name">PDP-11/70</div>' +
-                '<div class="sub">SimH \xb7 PiDP-11 \xb7 Home Assistant</div>' +
-              "</div>" +
-              '<div class="runlamp ' + lampCls + '">' +
-                '<div class="dot"></div>' +
-                '<div class="dlabel">' + lampTxt + "</div>" +
-              "</div>" +
-            "</div>" +
 
-            '<div class="regrow">' +
-              '<div class="rowhead">' +
-                '<span class="rlabel">Address Register (PC)</span>' +
-                '<span class="rval rv-pc">' + pcDisp + "</span>" +
-              "</div>" +
-              ledRow(pcBits, G4, "adr") +
-            "</div>" +
+        // ── Header ──
+        '<div class="hdr">' +
+          '<div class="logo"><em>pdp</em><strong>11</strong><em>/70</em></div>' +
+          '<div class="hdr-r">' +
+            '<div class="sysval">' + sys + '</div>' +
+            '<div class="cpustate ' + stCls + '">' + stLbl + '</div>' +
+          '</div>' +
+        '</div>' +
 
-            '<div class="regrow">' +
-              '<div class="rowhead">' +
-                '<span class="rlabel">Data Register (PSW)</span>' +
-                '<span class="rval rv-ps">' + pswDisp + "</span>" +
-              "</div>" +
-              ledRow(pswBits, G4, "dat") +
-            "</div>" +
+        // ── Faceplate ──
+        '<div class="face">' +
 
-            selRow("ADDR", addrModes) +
-            selRow("DATA", dataModes) +
+          // Row 1: Status indicators
+          '<div class="statrow">' +
+            // Group 1 — system/CPU state
+            '<div class="sigrp">' +
+              si(false, 'PAR ERR') +
+              si(false, 'ADRS ERR') +
+              si(running, 'RUN') +
+              si(false, 'PAUSE') +
+              si(false, 'MASTER') +
+            '</div>' +
+            // Group 2 — privilege mode
+            '<div class="sigrp">' +
+              si(mode === 'user',       'USER') +
+              si(mode === 'supervisor', 'SUPER') +
+              si(mode === 'kernel',     'KERNEL') +
+              si(false, 'DATA') +
+            '</div>' +
+            // Group 3 — addressing mode (PDP-11/70 always uses 22-bit)
+            '<div class="sigrp">' +
+              '<div class="amgrp">' +
+                '<div class="amlbl">ADDRESSING</div>' +
+                '<div class="aminner">' +
+                  si(false,    '16') +
+                  si(false,    '18') +
+                  si(!offline, '22') +
+                '</div>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
 
-            (srHasSensors
-              ? '<div class="regrow swrow">' +
-                  '<div class="rowhead">' +
-                    '<span class="rlabel">Switch Register (SR21 → SR0)</span>' +
-                    '<span class="rval"></span>' +
-                  "</div>" +
-                  swRow(srBits, G22) +
-                "</div>"
-              : "") +
+          // Row 2: ADDRESS register (22 LEDs, dark-red segment bar)
+          '<div class="regrow">' +
+            '<div class="segbar addr"></div>' +
+            '<div class="reginner">' +
+              ledRow(pcB, G22, 'adr') +
+              '<div class="regright">' +
+                '<span class="rlbl">ADDRESS</span>' +
+                '<span class="rval rv-pc">' + pcD + '</span>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
 
-          "</div>" +
+          // Row 3: DATA register (PARITY H/L + 16 LEDs, dark-purple segment bar)
+          '<div class="regrow">' +
+            '<div class="segbar data"></div>' +
+            '<div class="reginner">' +
+              '<div class="pargrp">' +
+                '<div class="pardots"><div class="pardot"></div><div class="pardot"></div></div>' +
+                '<div class="parhl"><span>H</span><span>L</span></div>' +
+                '<div class="parlbl">PAR</div>' +
+              '</div>' +
+              ledRow(pswB, G16, 'dat') +
+              '<div class="regright">' +
+                '<span class="rlbl">DATA</span>' +
+                '<span class="rval rv-ps">' + pswD + '</span>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
 
-          '<div class="bar">' +
-            '<div class="sysinfo">' +
-              '<div class="syslbl">System</div>' +
-              '<div class="sysval">' + sys + "</div>" +
-            "</div>" +
-            '<div class="indrow">' +
-              '<div class="ind">' +
-                '<div class="idot' + (running ? " on" : "") + '"></div>' +
-                '<div class="ilbl">PROC</div>' +
-              "</div>" +
-              '<div class="ind">' +
-                '<div class="idot' + (cpuMode === "kernel" ? " on" : "") + '"></div>' +
-                '<div class="ilbl">KRNL</div>' +
-              "</div>" +
-              '<div class="ind">' +
-                '<div class="idot' + (cpuMode === "supervisor" ? " on" : "") + '"></div>' +
-                '<div class="ilbl">SUPV</div>' +
-              "</div>" +
-              '<div class="ind">' +
-                '<div class="idot' + (cpuMode === "user" ? " on" : "") + '"></div>' +
-                '<div class="ilbl">USER</div>' +
-              "</div>" +
-            "</div>" +
-          "</div>" +
-        "</div>";
+          // Row 4: Switch Register (SR21..SR0, toggle style)
+          (srHas
+            ? '<div class="srsec">' +
+                bitNums(22, G22) +
+                swRow(srB, G22) +
+              '</div>'
+            : '') +
+
+          // Row 5: Rotary selector indicators
+          '<div class="selsec">' +
+            selRow('ADDR', addrModes) +
+            selRow('DATA', dataModes) +
+          '</div>' +
+
+        '</div>' +
+
+        // ── Footer bar ──
+        '<div class="bar">' +
+          '<div class="barsys">' +
+            '<div class="barsyslbl">System</div>' +
+            '<div class="barsysval">' + sys + '</div>' +
+          '</div>' +
+          '<div class="ctrlrow">' +
+            '<span class="cbtn">LOAD ADRS</span>' +
+            '<span class="cbtn">EXAM</span>' +
+            '<span class="cbtn">DEP</span>' +
+            '<span class="cbtn">CONT</span>' +
+            '<span class="cbtn ' + (running ? 'act' : '') + '">' +
+              (running ? 'ENABLE' : 'HALT') + '</span>' +
+            '<span class="cbtn">S INST</span>' +
+            '<span class="cbtn">START</span>' +
+          '</div>' +
+        '</div>' +
+
+        '</div>';
     };
 
     return PiDP11PanelCard;
-  })();
+  }());
 
   customElements.define("pidp11-panel-card", PiDP11PanelCard);
 
-  // Register with the HA card picker
   window.customCards = window.customCards || [];
   window.customCards.push({
-    type: "pidp11-panel-card",
-    name: "PiDP-11 Front Panel",
-    description:
-      "Amber blinkenlight display for the PDP-11/70 emulator — " +
-      "live address/data LEDs, switch register, rotary selector indicators, " +
-      "CPU mode, and OS name. Animates at 20 Hz when the lamp stream is connected.",
-    preview: true,
+    type:             "pidp11-panel-card",
+    name:             "PiDP-11 Front Panel",
+    description:      "Faithful PDP-11/70 front panel — 22 ADDRESS LEDs, status row, SR toggles, rotary selectors, 20 Hz live animation.",
+    preview:          true,
     documentationURL: "https://github.com/dmz006/pidp11-hacs",
   });
-})();
+}());
