@@ -1,6 +1,6 @@
 # Sprint 5 — Lamps, Switches, and Lovelace Front-Panel Dashboard
 
-**Owner:** TBD. **Status:** planned. Post-v1.
+**Owner:** TBD. **Status:** phase-1-complete (Lovelace card shipped Jun 21 2026; phase 2 — real-time lamps — needs driver push channel, deferred post-v1.0).
 
 ## Goal
 
@@ -24,14 +24,16 @@ push-notification socket from the driver.
 
 ### Lovelace card (R1 from roadmap)
 
-1. **Custom card.** `lovelace/pidp11-panel-card.js` (LitElement).
-   Takes an `entity: sensor.pidp11_registers` config; subscribes to
-   the entity's state stream and repaints the SVG panel at 20 Hz max.
-2. **Panel graphic.** SVG reference-matching the PiDP-11 front plate.
-   LEDs are `<circle>` elements; switches are `<polygon>` toggles
-   with click handlers that call `pidp11.switch_set` service.
-3. **HACS Lovelace** category — card registered so the same HACS
-   install picks it up.
+1. ✅ **Custom card.** `custom_components/pidp11/www/pidp11-panel-card.js` (vanilla
+   HTMLElement; zero npm/build dependencies). Serves via `hass.http.register_static_path`
+   and `add_extra_js_url` in `__init__.py` — auto-registered on integration install.
+   Type: `custom:pidp11-panel-card`. Entities configurable; defaults auto-detect.
+2. ✅ **Panel graphic.** Amber-on-dark retro panel. Two 16-LED rows (ADDRESS/PC,
+   DATA/PSW), RUN lamp, system name, status indicators (PROC/BUS/PAR/ERR).
+   Polls existing coordinator sensors at 5 s interval. Screenshot in `docs/images/`.
+3. ⏳ **HACS Lovelace category** — card can also be distributed as a HACS Plugin
+   by re-registering the repo under the Plugin category. Deferred until the card
+   is stable enough to maintain separately.
 
 ### Lamp & switch pipeline
 

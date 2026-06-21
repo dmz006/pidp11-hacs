@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 import voluptuous as vol
 
+from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError
@@ -27,6 +29,10 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[str] = ["sensor", "switch"]
 
+_CARD_URL = "/pidp11-hacs/pidp11-panel-card.js"
+_CARD_FILE = Path(__file__).parent / "www" / "pidp11-panel-card.js"
+_DATA_FRONTEND = f"{DOMAIN}_frontend_registered"
+
 type PiDP11ConfigEntry = ConfigEntry[PiDP11Coordinator]
 
 
@@ -43,6 +49,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: PiDP11ConfigEntry) -> bo
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _register_services(hass, coordinator)
+
+    # Serve the Lovelace card JS once per HA instance (not per config entry).
+    # The extra_module_url tells HA to load the script in every frontend session,
+    # which makes "type: custom:pidp11-panel-card" available in Lovelace.
+    if not hass.data.get(_DATA_FRONTEND):
+        hass.data[_DATA_FRONTEND] = True
+        hass.http.register_static_path(_CARD_URL, str(_CARD_FILE), cache_headers=False)
+        add_extra_js_url(hass, _CARD_URL)
+        _LOGGER.debug("Registered Lovelace card at %s", _CARD_URL)
+
     return True
 
 
