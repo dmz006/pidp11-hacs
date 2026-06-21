@@ -188,7 +188,14 @@ while true; do
         sw=$("${BIN_DIR}/scansw" 2>/dev/null || echo "0")
         lo=$(( sw % 262144 ))
         lo=$(printf "%04o" "${lo}")
-        SEL=$("${BIN_DIR}/getsel.sh" "${lo}" | sed 's/default/idled/')
+        _rawsel=$("${BIN_DIR}/getsel.sh" "${lo}")
+        # Switch position 0000 (all down) and "default" both mean "no selection" —
+        # honour DEFAULT_BOOT so the add-on option actually controls the home position.
+        if [[ "${_rawsel}" == "default" ]] || [[ "${lo}" == "0000" ]]; then
+            SEL="${DEFAULT_BOOT}"
+        else
+            SEL="${_rawsel}"
+        fi
         log "SR switches → octal ${lo} → system: ${SEL}"
     else
         SEL="${DEFAULT_BOOT}"
