@@ -108,4 +108,11 @@ RUN chmod +x /run.sh \
         > /etc/sudoers.d/pidp11-ssh \
  && chmod 440 /etc/sudoers.d/pidp11-ssh
 
+# Verify the lamp stream port is accepting connections.
+# If it fails 3 consecutive checks (90 s window) the container is marked unhealthy.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
+    CMD python3 -c \
+        "import socket,sys; s=socket.socket(); s.settimeout(3); \
+         r=s.connect_ex(('127.0.0.1',2226)); s.close(); sys.exit(r)"
+
 CMD ["/run.sh"]

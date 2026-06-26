@@ -146,30 +146,50 @@ _setup_ssh() {
     DROPBEAR_PID=$!
 }
 
-SHIM_PID=""
 DROPBEAR_PID=""
-ZEROCONF_PID=""
 
 cleanup() {
     log "Shutting down..."
-    [[ -n "${SHIM_PID}"      ]] && kill "${SHIM_PID}"      2>/dev/null || true
+    pkill -f "authshim.py"         2>/dev/null || true
+    pkill -f "zeroconf_advertise"  2>/dev/null || true
     [[ -n "${DROPBEAR_PID}"  ]] && kill "${DROPBEAR_PID}"  2>/dev/null || true
-    [[ -n "${ZEROCONF_PID}"  ]] && kill "${ZEROCONF_PID}"  2>/dev/null || true
     pkill -x pidp1170_blinkenlightd 2>/dev/null || true
     pkill rpcbind 2>/dev/null || true
     screen -S pidp11 -X quit 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
-# ── Auth shim — start once, persists across reboots ──────────────────────────
+# ── Auth shim — watched; auto-restarts on crash ───────────────────────────────
 log "Starting auth shim (:2223 → SimH :2224)"
 SECRET_FILE="${SECRET_FILE}" python3 "${BIN_DIR}/authshim.py" &
-SHIM_PID=$!
+
+_watch_process() {
+    # _watch_process <label> <match-pattern> <start-command>
+    # Runs in background; restarts the target process if it exits unexpectedly.
+    local label="$1" pattern="$2" cmd="$3"
+    local delay=5
+    while true; do
+        sleep "${delay}"
+        if ! pgrep -f "${pattern}" > /dev/null 2>&1; then
+            log "${label} exited — restarting (backoff ${delay}s)"
+            eval "${cmd}" &
+            # Cap backoff at 60 s; reset will happen on the next successful cycle
+            delay=$(( delay < 60 ? delay * 2 : 60 ))
+        else
+            delay=5
+        fi
+    done
+}
+
+_watch_process "Auth shim" "authshim.py" \
+    "SECRET_FILE='${SECRET_FILE}' python3 '${BIN_DIR}/authshim.py'" &
 
 # ── mDNS advertisement — announce _pidp11._tcp.local. on the LAN ─────────────
 log "Starting mDNS advertisement"
 python3 "${BIN_DIR}/zeroconf_advertise.py" &
-ZEROCONF_PID=$!
+
+_watch_process "mDNS advertiser" "zeroconf_advertise" \
+    "python3 '${BIN_DIR}/zeroconf_advertise.py'" &
 
 _setup_ssh
 
