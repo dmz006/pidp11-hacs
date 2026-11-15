@@ -7,6 +7,14 @@ the HACS integration version (see AGENT.md §7).
 
 ## [Unreleased]
 
+### Fixed
+- Auth shim leaked SimH console connections when a client vanished; it now closes them in a
+  `finally`, detects client EOF on streams, enforces `IDLE_TIMEOUT` and sends keepalives.
+
+### Added
+- `AUTH <secret> +sr` on the lamp port (2226) also streams `EVENT sr value=<octal>`.
+- Env vars `IDLE_TIMEOUT` (3600) and `HEARTBEAT_INTERVAL` (15).
+
 ## [1.4.3] - 2026-11-15
 
 ### Changed

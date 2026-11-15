@@ -51,3 +51,6 @@ AGENT.md
 # datawatch-managed (BL219)
 .gemini/
 pidp11-addon/bin/
+
+# Node test-harness dependencies (tests/card)
+node_modules/

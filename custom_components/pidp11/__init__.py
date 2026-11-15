@@ -46,10 +46,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: PiDP11ConfigEntry) -> bo
     )
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
-    coordinator.start_sr_watch(f"{DOMAIN}_sr_watch")
-    coordinator.start_lamp_watch(f"{DOMAIN}_lamp_watch")
+    # One long-lived stream carries the lamps and the switch register: together
+    # with a poll the integration holds at most 2 of SimH's 4 console connections
+    # (boot.ini: `set remote connections=4`), so a poll always finds a free one.
+    coordinator.start_sr_watch(f"{DOMAIN}_stream")
+    coordinator.start_lamp_watch(f"{DOMAIN}_stream")
 
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    try:
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    except BaseException:
+        await coordinator.async_stop_streams()
+        raise
     _register_services(hass, coordinator)
 
     # Serve the Lovelace card JS once per HA instance (not per config entry).
@@ -69,8 +76,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PiDP11ConfigEntry) -> bo
 
 async def async_unload_entry(hass: HomeAssistant, entry: PiDP11ConfigEntry) -> bool:
     """Unload a config entry."""
-    entry.runtime_data.stop_sr_watch()
-    entry.runtime_data.stop_lamp_watch()
+    # Cancel the stream and wait for its SimH connection to be released.
+    await entry.runtime_data.async_stop_streams()
     if hass.services.has_service(DOMAIN, SERVICE_HALT):
         hass.services.async_remove(DOMAIN, SERVICE_HALT)
         hass.services.async_remove(DOMAIN, SERVICE_CONTINUE)

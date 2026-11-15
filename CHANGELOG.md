@@ -6,6 +6,28 @@ AGENT.md §7.
 
 ## [Unreleased]
 
+### Fixed
+- Dashboard card never rendered in Home Assistant: it is now a real custom element
+  (`extends HTMLElement`), so Lovelace's `document.createElement` gets `setConfig`/`hass`.
+- Card and README used `pidp11_*` entity ids; the device slugs to `pidp_11_*`. The card now
+  falls back to the entity with the same suffix under either prefix.
+- SimH ran out of its 4 console connections ("All connections busy"): the integration now
+  shares one stream for lamps and SR, closes every connection, backs off, and keeps the last
+  values while SimH is busy. The auth shim closes a SimH connection when its client goes away,
+  times out idle proxied sessions and sends keepalive comments.
+
+### Operator review required
+- Entity ids are `pidp_11_*`, not `pidp11_*`. Check every automation, script, template and
+  dashboard that references `pidp11_*` ids (Developer Tools → States) and update or rename.
+- SR now rides the lamp stream (`AUTH <secret> +sr`, port 2226). Custom clients on port 2225
+  keep working; re-check any proxy or firewall rule that only allows 2225.
+- Reload the `pidp11-panel-card.js` resource (clear the browser cache) after upgrading.
+
+### Changed
+- The SR watch now rides the lamp stream (port 2226, `AUTH <secret> +sr`); port 2225 stays for old clients.
+- Entity ids in the README: `sensor.pidp_11_switch_register`, `binary_sensor.pidp_11_cpu_halted`.
+- Tests: Node/jsdom card tests under `tests/card` (`npm ci`).
+
 ## [1.4.3] - 2026-11-15
 
 ### Fixed

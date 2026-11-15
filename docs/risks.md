@@ -1,5 +1,10 @@
 # Risks & Open Questions
 
+
+> **Entity ids:** the device "PiDP-11" slugs to `pidp_11`, so the real ids are `pidp_11_*`
+> (e.g. `sensor.pidp_11_cpu_state`). The `pidp11_*` ids below are historical; installs made
+> with an older slug may still have them. Do not copy them verbatim.
+
 Living document. Each entry has an owner, a mitigation, and — once
 retired — a link to the PR that closed it.
 

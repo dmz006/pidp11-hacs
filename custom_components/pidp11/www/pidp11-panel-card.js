@@ -23,6 +23,42 @@
 
   function octalToInt(s) { return s ? parseInt(s, 8) : 0; }
 
+  // Entity ids come from the integration's device "PiDP-11": HA slugs it to
+  // pidp_11 (pidp11 on installs made with the older slug). The defaults below
+  // use pidp_11. A configured or default id that is not in hass.states is
+  // resolved by suffix under either device prefix, so "_2" duplicates and
+  // renamed entities still work.
+  var DEVICE_OBJECT_RE = /^pidp_?11_/;
+
+  // Domain and object-id suffix of each single-entity option.
+  var SINGLE_ENTITY = {
+    state_entity:    ["sensor", "cpu_state"],
+    pc_entity:       ["sensor", "pc"],
+    psw_entity:      ["sensor", "psw"],
+    system_entity:   ["sensor", "system"],
+    cpu_mode_entity: ["sensor", "cpu_mode"],
+  };
+
+  function escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+  // Smallest entity id in `states` of `domain` whose object id is under the device
+  // prefix and ends in "_<suffix>", optionally followed by "_<n>". One pass, no
+  // sort, so it stays cheap on every hass update. Returns null when there is none.
+  function findDeviceEntity(states, domain, suffix) {
+    var tail = new RegExp("_" + escapeRegExp(suffix) + "(_\\d+)?$");
+    var head = domain + ".";
+    var keys = Object.keys(states);
+    var best = null;
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i];
+      if (key.indexOf(head) !== 0) continue;
+      var obj = key.slice(head.length);
+      if (!DEVICE_OBJECT_RE.test(obj) || !tail.test(obj)) continue;
+      if (best === null || key < best) best = key;
+    }
+    return best;
+  }
+
   function intToBits(n, len) {
     var bits = [];
     for (var i = len - 1; i >= 0; i--) bits.push((n >>> i) & 1);
@@ -209,64 +245,103 @@
 
   // ── Card element ───────────────────────────────────────────────────────────
 
-  var PiDP11PanelCard = (function () {
+  // Lovelace creates the card with document.createElement, so it must be a real
+  // custom element: a class that extends HTMLElement and calls super(). A
+  // constructor function that never runs the HTMLElement constructor gets no
+  // setConfig/hass wiring, and the card never renders.
+  class PiDP11PanelCard extends HTMLElement {
 
-    function PiDP11PanelCard() {
+    constructor() {
+      super();
       this.attachShadow({ mode: "open" });
+      this._cfg     = null;
+      this._hass    = null;
+      this._found   = {};
       this._livePC  = 0;
       this._livePSW = 0;
       this._lampSub = null;
       this._rafId   = null;
     }
 
-    PiDP11PanelCard.prototype = Object.create(HTMLElement.prototype);
-    PiDP11PanelCard.prototype.constructor = PiDP11PanelCard;
-
-    PiDP11PanelCard.prototype.setConfig = function (config) {
+    setConfig(config) {
       this._cfg = {
-        state_entity:    config.state_entity    || "sensor.pidp11_cpu_state",
-        pc_entity:       config.pc_entity       || "sensor.pidp11_pc",
-        psw_entity:      config.psw_entity      || "sensor.pidp11_psw",
-        system_entity:   config.system_entity   || "sensor.pidp11_system",
-        sr_prefix:       config.sr_prefix       || "binary_sensor.pidp11_sr",
-        cpu_mode_entity: config.cpu_mode_entity || "sensor.pidp11_cpu_mode",
+        state_entity:    config.state_entity    || "sensor.pidp_11_cpu_state",
+        pc_entity:       config.pc_entity       || "sensor.pidp_11_pc",
+        psw_entity:      config.psw_entity      || "sensor.pidp_11_psw",
+        system_entity:   config.system_entity   || "sensor.pidp_11_system",
+        sr_prefix:       config.sr_prefix       || "binary_sensor.pidp_11_sr",
+        cpu_mode_entity: config.cpu_mode_entity || "sensor.pidp_11_cpu_mode",
       };
-    };
+    }
 
-    PiDP11PanelCard.prototype.getCardSize = function () { return 6; };
+    getCardSize() { return 6; }
 
-    PiDP11PanelCard.prototype.disconnectedCallback = function () {
-      if (this._lampSub) {
-        Promise.resolve(this._lampSub).then(function (u) { try { u && u(); } catch (e) {} });
-        this._lampSub = null;
-      }
+    set hass(hass) {
+      this._hass = hass;
+      if (!this._cfg) this.setConfig({});
+      this._subscribeLamps();
+      var pcOct  = this._st(this._entity("pc_entity"));
+      var pswOct = this._st(this._entity("psw_entity"));
+      if (pcOct  !== null) this._livePC  = octalToInt(pcOct);
+      if (pswOct !== null) this._livePSW = octalToInt(pswOct);
+      this._update();
+    }
+
+    connectedCallback() {
+      // Lamp feed is released on disconnect; re-attach it when the card returns.
+      this._subscribeLamps();
+    }
+
+    disconnectedCallback() {
+      this._unsubscribeLamps();
       if (this._rafId) { cancelAnimationFrame(this._rafId); this._rafId = null; }
-    };
+    }
 
-    Object.defineProperty(PiDP11PanelCard.prototype, "hass", {
-      set: function (hass) {
-        this._hass = hass;
-        if (!this._lampSub) {
-          var self = this;
-          this._lampSub = hass.connection.subscribeEvents(
-            function (ev) { self._onLamp(ev); }, "pidp11_lamps"
-          );
-        }
-        var pcOct  = this._st(this._cfg.pc_entity);
-        var pswOct = this._st(this._cfg.psw_entity);
-        if (pcOct  !== null) this._livePC  = octalToInt(pcOct);
-        if (pswOct !== null) this._livePSW = octalToInt(pswOct);
-        this._update();
-      },
-    });
+    _subscribeLamps() {
+      if (this._lampSub || !this._hass || !this.isConnected) return;
+      var self = this;
+      this._lampSub = this._hass.connection.subscribeEvents(
+        function (ev) { self._onLamp(ev); }, "pidp11_lamps"
+      );
+    }
 
-    PiDP11PanelCard.prototype._st = function (id) {
+    _unsubscribeLamps() {
+      if (!this._lampSub) return;
+      Promise.resolve(this._lampSub).then(function (u) { try { u && u(); } catch (e) {} });
+      this._lampSub = null;
+    }
+
+    _st(id) {
       return this._hass && this._hass.states[id] ? this._hass.states[id].state : null;
-    };
+    }
+
+    // Entity id for a single-entity option (state_entity, pc_entity, ...).
+    _entity(key) {
+      var kind = SINGLE_ENTITY[key];
+      return this._resolveId(this._cfg[key], kind[0], kind[1]);
+    }
+
+    // Entity id for SR bit `bit`: sr_prefix + bit, or the device's sr<bit>.
+    _srEntity(bit) {
+      return this._resolveId(this._cfg.sr_prefix + bit, "binary_sensor", "sr" + bit);
+    }
+
+    // Configured id if it exists; otherwise the device entity with this suffix.
+    // A found id is cached until it leaves hass.states.
+    _resolveId(configured, domain, suffix) {
+      var states = this._hass ? this._hass.states : {};
+      if (states[configured]) return configured;
+      var cacheKey = domain + "." + suffix;
+      var cached = this._found[cacheKey];
+      if (cached && states[cached]) return cached;
+      var found = findDeviceEntity(states, domain, suffix);
+      if (found) { this._found[cacheKey] = found; return found; }
+      return configured;
+    }
 
     // Fast path — only update LED class names and octal value text.
     // ADDRESS row uses 22 bits (PC zero-extended to PROG PHY 22-bit).
-    PiDP11PanelCard.prototype._updateLeds = function () {
+    _updateLeds() {
       var root = this.shadowRoot;
       if (!root) return;
       var adr  = root.querySelectorAll(".adr");
@@ -279,9 +354,9 @@
       var ed = root.querySelector(".rv-ps");
       if (ep) ep.textContent = this._livePC.toString(8).padStart(6, "0");
       if (ed) ed.textContent = this._livePSW.toString(8).padStart(6, "0");
-    };
+    }
 
-    PiDP11PanelCard.prototype._onLamp = function (ev) {
+    _onLamp(ev) {
       var d = ev.data;
       if (!d) return;
       var pc  = d.address !== undefined ? parseInt(d.address, 8) : this._livePC;
@@ -292,15 +367,15 @@
       if (this._rafId) return;
       var self = this;
       this._rafId = requestAnimationFrame(function () { self._rafId = null; self._updateLeds(); });
-    };
+    }
 
     // Full DOM rebuild — runs at 5 s entity-update cadence.
-    PiDP11PanelCard.prototype._update = function () {
+    _update() {
       if (!this._cfg || !this._hass) return;
 
-      var cpu     = this._st(this._cfg.state_entity) || "offline";
-      var sys     = this._st(this._cfg.system_entity) || "—";
-      var mode    = this._st(this._cfg.cpu_mode_entity);
+      var cpu     = this._st(this._entity("state_entity")) || "offline";
+      var sys     = this._st(this._entity("system_entity")) || "—";
+      var mode    = this._st(this._entity("cpu_mode_entity"));
 
       var running = cpu === "running";
       var offline = cpu === "offline" || cpu === "unavailable" || cpu === "unknown";
@@ -316,10 +391,10 @@
       // SR: bit 21 (MSB) = left, bit 0 (LSB) = right
       var srB = [];
       for (var b = 21; b >= 0; b--) {
-        var sv = this._st(this._cfg.sr_prefix + b);
+        var sv = this._st(this._srEntity(b));
         srB.push(sv === "on" ? 1 : 0);
       }
-      var srHas = !!this._hass.states[this._cfg.sr_prefix + "0"];
+      var srHas = !!this._hass.states[this._srEntity(0)];
 
       // Groups: [1,3,3,3,3,3,3,3] = 22 bits in "octal+1" grouping
       var G22 = [1, 3, 3, 3, 3, 3, 3, 3];
@@ -448,10 +523,8 @@
         '</div>' +
 
         '</div>';
-    };
-
-    return PiDP11PanelCard;
-  }());
+    }
+  }
 
   customElements.define("pidp11-panel-card", PiDP11PanelCard);
 

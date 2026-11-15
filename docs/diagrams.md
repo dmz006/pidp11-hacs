@@ -22,7 +22,7 @@ graph LR
     user -- "Lovelace UI" --> ha
     phone -- HTTPS --> ha
     ha -- "loads HACS<br/>custom_components/pidp11" --> ha
-    ha -- "TCP :2223<br/>remote console" --> addon
+    ha -- "TCP :2223 auth shim (poll/command)<br/>TCP :2226 lamp stream (+sr)" --> addon
     sup -- "runs / restarts" --> addon
     addon --> simh
     simh -- "mmap" --> gpio
@@ -39,7 +39,8 @@ graph TB
         db[dropbear<br/>:22]
         scr[GNU screen<br/>session 'pidp11']
         simh[SimH pdp11<br/>+ pidp11 GPIO driver]
-        rc[SimH remote console<br/>listener :2223]
+        rc[SimH remote console<br/>:2224 internal, connections=4]
+        shim[authshim<br/>:2223 console, :2226 lamp stream]
         sel[boot-selector<br/>service]
         opts[/data/options.json/]
         disks[(/share/pidp11/disks/)]
@@ -52,6 +53,7 @@ graph TB
     db --> scr
     scr --> simh
     simh --> rc
+    shim -- "one SimH connection per client,<br/>closed when the client goes" --> rc
     sel --> simh
     opts --> sel
     simh <--> disks
@@ -116,7 +118,7 @@ sequenceDiagram
     actor A as Automation
     participant HA as homeassistant runtime
     participant I as custom_components.pidp11
-    participant RC as SimH remote console :2223
+    participant RC as authshim :2223 → SimH remote console :2224
     participant E as SimH pdp11
 
     A->>HA: call service pidp11.boot boot="211bsd"
@@ -129,7 +131,7 @@ sequenceDiagram
     RC->>E: execute
     E-->>RC: boot output...
     RC-->>I: streamed lines
-    I->>HA: sensor.pidp11_state -> "running"
+    I->>HA: sensor.pidp_11_cpu_state -> "running"
     I->>HA: fire event pidp11_boot
 ```
 
@@ -141,21 +143,21 @@ sequenceDiagram
     participant G as RP1 GPIO
     participant D as blinkenlightd
     participant E as SimH pdp11
-    participant W as authshim watch :2225
-    participant C as coordinator._run_sr_watch
+    participant W as authshim lamp stream :2226 (+sr)
+    participant C as coordinator._run_stream
     participant HA as homeassistant runtime
 
     U->>G: flip SR switch N
     G->>D: GPIO sample
     D->>E: SR register updated via ONC RPC
-    Note over W: polls EXAMINE SR every 250 ms
+    Note over W: one SimH connection; polls EXAMINE SR every 250 ms<br/>(and PC/PSW for the lamps)
     W->>E: "EXAMINE SR\n"
     E-->>W: "SR:\t<new octal>\nsim> "
     W->>C: "EVENT sr value=<octal>\n"
     C->>HA: async_set_updated_data (sr=new)
     C->>HA: fire pidp11_switch_changed {switch: "SRN", state: true}
     C->>HA: fire pidp11_sr_changed {sr_old, sr_new}
-    HA->>HA: binary_sensor.pidp11_srN -> on
+    HA->>HA: binary_sensor.pidp_11_srN -> on
 ```
 
 ## 7. Topology B — Remote Pi deployment
@@ -178,7 +180,7 @@ graph TB
 
     zc -. "mDNS :5353" .-> ha
     ha -- "TCP :2223 auth shim" --> addon
-    ha -- "TCP :2225 watch stream" --> addon
+    ha -- "TCP :2226 lamp stream (+sr)" --> addon
     addon --> simh
     simh -- "ONC RPC" --> blink
     blink -- "/dev/mem mmap" --> hat

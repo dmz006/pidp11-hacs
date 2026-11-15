@@ -87,25 +87,64 @@ where `<octal>` is the 22-bit SR value in octal notation.
 
 The connection is long-lived. The client should reconnect on EOF or error.
 
+### Lamp stream (port + 3, default 2226)
+
+Same handshake and the same long-lived, one-SimH-connection-per-client behaviour
+as the watch stream. The server polls `EXAMINE PC` and `EXAMINE PSW` every 50 ms
+(`LAMP_INTERVAL_MS`) and pushes, once on connect and whenever either changes:
+
+```
+EVENT lamps ADDRESS=<pc octal> DATA=<psw octal>\n
+```
+
+A client that sends `AUTH <secret> +sr\n` also receives
+`EVENT sr value=<octal>\n` on this stream (checked every 250 ms, once on connect
+and on change), so a single connection carries everything the integration needs.
+A client that sends plain `AUTH <secret>\n` gets lamps only.
+
 ### Integration behaviour
 
-`PiDP11Coordinator` starts a background task (`_run_sr_watch`) that maintains
-this connection. On each `EVENT sr value=<octal>` line:
+`PiDP11Coordinator` starts one background task (`_run_stream`) that maintains a
+single stream for both lamps and SR: it connects to the lamp port
+(`remote_console_port + 3`) and authenticates with `AUTH <secret> +sr`, which
+adds the same `EVENT sr value=<octal>` lines to that stream. (This port, `+2`,
+stays available for older clients.) On each `EVENT sr value=<octal>` line:
 
 - `pidp11_switch_changed` HA events are fired for each SR bit that changed
   (payload: `{"switch": "SR<N>", "state": <bool>}`).
 - `pidp11_sr_changed` is fired with `{"sr_old": <octal>, "sr_new": <octal>}`.
 - `coordinator.data.sr` is updated immediately via `async_set_updated_data`.
 
-If the watch port is unavailable the coordinator falls back to the 5-second
-poll cycle (which also fires `pidp11_sr_changed` when the watch task is not
-running).
+If the stream is unavailable (or the add-on is older and refuses `+sr`, in which
+case the lamp stream runs without SR) the coordinator falls back to the 5-second
+poll cycle, which also fires `pidp11_sr_changed` when the stream is not carrying SR.
+
+### Connection budget
+
+Every client of the shim holds one SimH remote-console connection, and SimH only
+accepts a fixed number: every `boot.ini` sets `set remote connections=4`. Past
+that SimH replies `All connections busy` and hangs up. The shim therefore:
+
+- closes its SimH connection as soon as the client side is gone (FIN, reset or
+  write failure; the streams check for EOF rather than waiting for a write to
+  fail, because they only write when a register changes);
+- closes proxied sessions that have moved no bytes in either direction for
+  `IDLE_TIMEOUT` seconds (default 3600);
+- sends a `# keepalive` comment line on a stream that has been quiet for
+  `HEARTBEAT_INTERVAL` seconds (default 15). Clients ignore lines that do not
+  start with `EVENT`.
+
+The integration holds at most 2 connections: the one stream plus one transient
+connection (a poll or a command, never two at once). When SimH is busy a poll
+retries 3 times with doubling backoff (1 s, 2 s, 4 s; `_BUSY_BACKOFF_MAX` caps a single wait at 8 s, unreached with `_BUSY_RETRIES = 3`) and then keeps the last values.
 
 ## Re-connection
 
-If the TCP connection drops, the integration's coordinator reopens
-with exponential backoff (1 s, 2 s, 4 s, ..., capped at 60 s). The
-auth handshake runs fresh on every reconnect.
+If the TCP connection drops, the integration's coordinator reopens with
+exponential backoff (10 s, 20 s, 40 s, ..., capped at 120 s; reset once the
+stream delivers a line). The stream has no read timeout: a quiet machine sends
+nothing for long stretches, and reconnecting on silence is what used to strand a
+SimH connection each time. The auth handshake runs fresh on every reconnect.
 
 ## Versioning
 

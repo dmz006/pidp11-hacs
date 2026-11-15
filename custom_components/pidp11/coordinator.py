@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import socket
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import timedelta
 
@@ -37,6 +39,33 @@ _CMD_TIMEOUT = 8.0
 # last _STATE_TAIL bytes for "Simulator Running" to detect current CPU state.
 _DRAIN_QUIET = 0.5
 _STATE_TAIL = 300
+_AUTH_TIMEOUT = 5.0
+_RELEASE_TIMEOUT = 2.0
+
+# ── Connection budget ─────────────────────────────────────────────────────────
+# SimH only accepts a fixed number of remote-console connections: every boot.ini
+# in this repo sets `set remote connections=4`. Past that it accepts the TCP
+# connection, writes "All connections busy" and hangs up. A person on a console
+# session needs one or two of those, so the integration keeps to a budget of 2:
+#
+#   1 long-lived stream  (lamps + switch register, one connection through the shim)
+#   1 transient          (a poll or a service command, never two at once: _conn_lock)
+#
+# Every connection opened here is closed in a `finally`, the stream is cancelled
+# on unload, and when SimH says it is busy we back off and keep the last values
+# instead of flapping the entities to unavailable.
+_BUSY_TEXT = b"All connections busy"
+_BUSY_RETRIES = 3          # extra attempts after the first, within one poll/command
+_BUSY_BACKOFF_BASE = 1.0   # seconds; doubles each attempt
+_BUSY_BACKOFF_MAX = 8.0
+_STREAM_BACKOFF_BASE = 10.0   # seconds before the first stream reconnect; doubles
+_STREAM_BACKOFF_MAX = 120.0
+_STREAM_AUTH_RETRY = 30.0
+_STREAM_AUTH_SR = " +sr"      # ask the shim for SR events on the lamp stream too
+
+
+class PiDP11Busy(UpdateFailed):
+    """SimH has no free remote-console connection ("All connections busy")."""
 
 
 @dataclass(slots=True)
@@ -71,34 +100,46 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
         self.port = port
         self._secret = secret
         self._prev_sr: str | None = None
+        # Kept for compatibility; the shared stream below uses the lamp port.
         self._watch_port = port + WATCH_PORT_OFFSET
-        self._watch_task: asyncio.Task[None] | None = None
         self._lamp_port = port + LAMP_PORT_OFFSET
-        self._lamp_task: asyncio.Task[None] | None = None
+        # One long-lived stream carries both the lamps and the switch register.
+        self._stream_task: asyncio.Task[None] | None = None
+        self._stream_has_sr = False
+        # At most one transient connection (poll or command) at a time.
+        self._conn_lock = asyncio.Lock()
+        self._busy_logged = False
 
     # ── Public command API ────────────────────────────────────────────────────
 
     async def async_send_command(self, cmd: str) -> str:
-        """Open a connection, auth, send one SimH command, return text response."""
-        try:
-            async with asyncio.timeout(_CONNECT_TIMEOUT + _CMD_TIMEOUT):
-                return await self._do_command(cmd)
-        except TimeoutError as exc:
-            raise UpdateFailed(f"PiDP-11 command timed out: {cmd!r}") from exc
+        """Open a connection, auth, send one SimH command, return text response.
+
+        Waits for any poll or other command in flight (one transient connection
+        at a time) and retries with backoff while SimH reports it is busy.
+        """
+        async with self._conn_lock:
+            try:
+                return await self._with_busy_retry(lambda: self._timed_command(cmd))
+            except TimeoutError as exc:
+                raise UpdateFailed(f"PiDP-11 command timed out: {cmd!r}") from exc
 
     # ── DataUpdateCoordinator hook ────────────────────────────────────────────
 
     async def _async_update_data(self) -> PiDP11State:
         system = _read_current_system()
         try:
-            async with asyncio.timeout(_CONNECT_TIMEOUT + _CMD_TIMEOUT * 3):
-                state = await self._poll(system)
+            async with self._conn_lock:
+                state = await self._with_busy_retry(lambda: self._timed_poll(system))
+        except PiDP11Busy as exc:
+            return self._keep_last_values(system, exc)
         except TimeoutError as exc:
             raise UpdateFailed("PiDP-11 connection timed out") from exc
         except UpdateFailed:
             raise
         except Exception as exc:
             raise UpdateFailed(f"PiDP-11 error: {exc}") from exc
+        self._busy_logged = False
 
         # Fire SR-changed event when the switch register value changes.
         # Only fire from poll if watch task isn't active (legacy/fallback mode),
@@ -108,7 +149,7 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
             new_sr is not None
             and self._prev_sr is not None
             and new_sr != self._prev_sr
-            and (self._watch_task is None or self._watch_task.done())
+            and not self._stream_carries_sr()
         ):
             self.hass.bus.async_fire(
                 EVENT_SR_CHANGED,
@@ -121,6 +162,43 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
+    def _keep_last_values(self, system: str | None, exc: PiDP11Busy) -> PiDP11State:
+        """Console busy even after backoff: keep the entities on their last values."""
+        if self.data is None:
+            raise UpdateFailed(str(exc)) from exc
+        if not self._busy_logged:
+            _LOGGER.warning("%s; keeping the last values until a connection is free", exc)
+            self._busy_logged = True
+        else:
+            _LOGGER.debug("%s; still keeping the last values", exc)
+        return replace(self.data, system=system)
+
+    def _stream_carries_sr(self) -> bool:
+        task = self._stream_task
+        return task is not None and not task.done() and self._stream_has_sr
+
+    async def _with_busy_retry[T](self, op: Callable[[], Awaitable[T]]) -> T:
+        """Run ``op``; while SimH is busy retry with exponential backoff."""
+        delay = _BUSY_BACKOFF_BASE
+        for attempt in range(_BUSY_RETRIES + 1):
+            try:
+                return await op()
+            except PiDP11Busy:
+                if attempt == _BUSY_RETRIES:
+                    raise
+                _LOGGER.debug("PiDP-11 console busy; retrying in %.2f s", delay)
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, _BUSY_BACKOFF_MAX)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    async def _timed_poll(self, system: str | None) -> PiDP11State:
+        async with asyncio.timeout(_CONNECT_TIMEOUT + _CMD_TIMEOUT * 3):
+            return await self._poll(system)
+
+    async def _timed_command(self, cmd: str) -> str:
+        async with asyncio.timeout(_CONNECT_TIMEOUT + _CMD_TIMEOUT):
+            return await self._do_command(cmd)
+
     async def _open_and_auth(
         self,
     ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
@@ -128,12 +206,16 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
             asyncio.open_connection(self.host, self.port),
             timeout=_CONNECT_TIMEOUT,
         )
-        writer.write(f"AUTH {self._secret}\n".encode())
-        await writer.drain()
-        line = await asyncio.wait_for(reader.readline(), timeout=5.0)
-        if not line.startswith(b"OK"):
+        try:
+            writer.write(f"AUTH {self._secret}\n".encode())
+            await writer.drain()
+            line = await asyncio.wait_for(reader.readline(), timeout=_AUTH_TIMEOUT)
+            if not line.startswith(b"OK"):
+                raise UpdateFailed(f"Auth rejected: {line!r}")
+        except BaseException:
+            # Timeout, cancellation, reset or rejection: never strand the socket.
             _close(writer)
-            raise UpdateFailed(f"Auth rejected: {line!r}")
+            raise
         return reader, writer
 
     async def _read_to_prompt(self, reader: asyncio.StreamReader) -> bytes:
@@ -158,8 +240,12 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
                 reader.readuntil(_PROMPT), timeout=_CMD_TIMEOUT
             )
             buf.extend(initial)
-        except (TimeoutError, asyncio.IncompleteReadError):
+        except TimeoutError:
             pass
+        except asyncio.IncompleteReadError as exc:
+            # EOF before a prompt: keep what arrived. A busy SimH sends only
+            # "All connections busy" and hangs up.
+            buf.extend(exc.partial)
         # Step 2: drain remaining history (0 bytes on a fresh session).
         while True:
             try:
@@ -177,6 +263,7 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
             # Drain the full SimH output buffer (may contain many prior sessions).
             # CPU state is determined from the *tail* which reflects current state.
             banner = await self._drain_banner(reader)
+            _raise_if_busy(banner)
             cpu_state = (
                 CPU_STATE_RUNNING
                 if b"Simulator Running" in banner[-_STATE_TAIL:]
@@ -207,89 +294,123 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
                 system=system,
             )
         finally:
-            _close(writer)
+            await _release(reader, writer)
 
     async def _do_command(self, cmd: str) -> str:
         reader, writer = await self._open_and_auth()
         try:
-            await self._drain_banner(reader)  # consume banner + all history
+            _raise_if_busy(await self._drain_banner(reader))  # banner + all history
             writer.write(f"{cmd}\n".encode())
             await writer.drain()
             raw = await self._read_to_prompt(reader)
             text = raw[: -len(_PROMPT)].decode(errors="replace")
             return _strip_echo(cmd, text)
         finally:
-            _close(writer)
+            await _release(reader, writer)
 
-    # ── Watch stream ──────────────────────────────────────────────────────────
+    # ── Shared stream ─────────────────────────────────────────────────────────
+    #
+    # The SR watch and the lamp animation used to hold one SimH connection each.
+    # They now share one: the lamp stream with the "+sr" option also carries the
+    # switch register. start_sr_watch / start_lamp_watch / stop_* stay as the
+    # public names; either start call makes sure the one stream is running.
 
     def start_sr_watch(self, task_name: str) -> None:
-        """Start the long-lived SR watch task (no-op if already running)."""
-        if self._watch_task and not self._watch_task.done():
-            return
-        self._watch_task = self.hass.async_create_background_task(
-            self._run_sr_watch(), name=task_name
-        )
-
-    def stop_sr_watch(self) -> None:
-        """Cancel the SR watch task."""
-        if self._watch_task:
-            self._watch_task.cancel()
-            self._watch_task = None
-
-    # ── Lamp stream ───────────────────────────────────────────────────────────
+        """Make sure the shared stream is running (no-op if it already is)."""
+        self._start_stream(task_name)
 
     def start_lamp_watch(self, task_name: str) -> None:
-        """Start the long-lived lamp watch task (no-op if already running)."""
-        if self._lamp_task and not self._lamp_task.done():
-            return
-        self._lamp_task = self.hass.async_create_background_task(
-            self._run_lamp_watch(), name=task_name
-        )
+        """Make sure the shared stream is running (no-op if it already is)."""
+        self._start_stream(task_name)
+
+    def stop_sr_watch(self) -> None:
+        """Cancel the shared stream."""
+        self._cancel_stream()
 
     def stop_lamp_watch(self) -> None:
-        """Cancel the lamp watch task."""
-        if self._lamp_task:
-            self._lamp_task.cancel()
-            self._lamp_task = None
+        """Cancel the shared stream."""
+        self._cancel_stream()
 
-    async def _run_lamp_watch(self) -> None:
-        """Long-lived lamp stream connection. Reconnects on failure."""
+    async def async_stop_streams(self) -> None:
+        """Cancel the shared stream and wait until its connection is closed."""
+        task = self._stream_task
+        self._stream_task = None
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def async_shutdown(self) -> None:
+        """Stop the stream along with the coordinator's own timers."""
+        await self.async_stop_streams()
+        await super().async_shutdown()
+
+    def _start_stream(self, task_name: str) -> None:
+        if self._stream_task and not self._stream_task.done():
+            return
+        self._stream_task = self.hass.async_create_background_task(
+            self._run_stream(), name=task_name
+        )
+
+    def _cancel_stream(self) -> None:
+        if self._stream_task:
+            self._stream_task.cancel()
+
+    async def _run_stream(self) -> None:
+        """The one long-lived stream. Reconnects with backoff; closes on every exit."""
+        delay = _STREAM_BACKOFF_BASE
+        auth_flags = _STREAM_AUTH_SR
         while True:
+            writer: asyncio.StreamWriter | None = None
+            got_line = False
             try:
-                reader, writer = await asyncio.wait_for(
+                reader, conn = await asyncio.wait_for(
                     asyncio.open_connection(self.host, self._lamp_port),
                     timeout=_CONNECT_TIMEOUT,
                 )
-                try:
-                    writer.write(f"AUTH {self._secret}\n".encode())
-                    await writer.drain()
-                    line = await asyncio.wait_for(reader.readline(), timeout=5.0)
-                    if not line.startswith(b"OK"):
-                        _LOGGER.debug(
-                            "Lamp watch: auth failed on port %s", self._lamp_port
-                        )
-                        await asyncio.sleep(30.0)
+                writer = conn
+                _enable_keepalive(conn)
+                conn.write(f"AUTH {self._secret}{auth_flags}\n".encode())
+                await conn.drain()
+                line = await asyncio.wait_for(reader.readline(), timeout=_AUTH_TIMEOUT)
+                if not line.startswith(b"OK"):
+                    if auth_flags and line.startswith(b"DENY"):
+                        # An add-on from before the shared stream: lamps only,
+                        # and the poll fires the SR events.
+                        _LOGGER.debug("Stream: shim refused %r; falling back", auth_flags)
+                        auth_flags = ""
                         continue
-                    _LOGGER.debug("Lamp watch connected on port %s", self._lamp_port)
-                    while True:
-                        line = await asyncio.wait_for(reader.readline(), timeout=60.0)
-                        if not line:
-                            break
-                        self._handle_lamp_line(line.decode(errors="replace").strip())
-                finally:
-                    try:
-                        writer.close()
-                        await writer.wait_closed()
-                    except Exception:
-                        pass
-            except asyncio.CancelledError:
-                return
+                    _LOGGER.debug("Stream: auth failed on port %s", self._lamp_port)
+                    await asyncio.sleep(_STREAM_AUTH_RETRY)
+                    continue
+                _LOGGER.debug("Stream connected on port %s", self._lamp_port)
+                self._stream_has_sr = bool(auth_flags)
+                # No read timeout: a quiet machine legitimately sends nothing, and
+                # giving up on silence is what used to strand a SimH connection per
+                # reconnect. Dead peers are caught by TCP keepalive and by the
+                # shim's heartbeat/EOF handling.
+                while True:
+                    line = await reader.readline()
+                    if not line:
+                        break
+                    got_line = True
+                    await self._handle_stream_line(line.decode(errors="replace").strip())
             except Exception as exc:
-                _LOGGER.debug(
-                    "Lamp watch disconnected: %s — retrying in 10 s", exc
-                )
-            await asyncio.sleep(10.0)
+                _LOGGER.debug("Stream disconnected: %s — retrying in %.1f s", exc, delay)
+            finally:
+                self._stream_has_sr = False
+                if writer is not None:
+                    _close(writer)
+            if got_line:
+                delay = _STREAM_BACKOFF_BASE
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, _STREAM_BACKOFF_MAX)
+
+    async def _handle_stream_line(self, msg: str) -> None:
+        """Route one line from the shared stream; heartbeats and unknowns are ignored."""
+        if msg.startswith("EVENT lamps "):
+            self._handle_lamp_line(msg)
+        elif msg.startswith("EVENT sr value="):
+            await self._handle_watch_line(msg)
 
     def _handle_lamp_line(self, msg: str) -> None:
         """Fire pidp11_lamps event for each EVENT lamps line from the stream."""
@@ -302,46 +423,6 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
             EVENT_LAMPS,
             {"address": m.group(1), "data": m.group(2)},
         )
-
-    async def _run_sr_watch(self) -> None:
-        """Long-lived watch stream connection. Reconnects on failure."""
-        while True:
-            try:
-                reader, writer = await asyncio.wait_for(
-                    asyncio.open_connection(self.host, self._watch_port),
-                    timeout=_CONNECT_TIMEOUT,
-                )
-                try:
-                    writer.write(f"AUTH {self._secret}\n".encode())
-                    await writer.drain()
-                    line = await asyncio.wait_for(reader.readline(), timeout=5.0)
-                    if not line.startswith(b"OK"):
-                        _LOGGER.debug(
-                            "SR watch: auth failed on port %s", self._watch_port
-                        )
-                        await asyncio.sleep(30.0)
-                        continue
-                    _LOGGER.debug("SR watch connected on port %s", self._watch_port)
-                    while True:
-                        line = await asyncio.wait_for(reader.readline(), timeout=60.0)
-                        if not line:
-                            break
-                        await self._handle_watch_line(
-                            line.decode(errors="replace").strip()
-                        )
-                finally:
-                    try:
-                        writer.close()
-                        await writer.wait_closed()
-                    except Exception:
-                        pass
-            except asyncio.CancelledError:
-                return
-            except Exception as exc:
-                _LOGGER.debug(
-                    "SR watch disconnected: %s — retrying in 10 s", exc
-                )
-            await asyncio.sleep(10.0)
 
     async def _handle_watch_line(self, msg: str) -> None:
         """Process a line from the watch stream."""
@@ -417,6 +498,51 @@ def _read_current_system() -> str | None:
         return val or None
     except OSError:
         return None
+
+
+def _raise_if_busy(banner: bytes) -> None:
+    """SimH at its connection limit sends only "All connections busy" and hangs up.
+
+    A real session always shows the sim> prompt, so the text alone in a banner
+    (even one that replays old console output) is not mistaken for it.
+    """
+    if _BUSY_TEXT in banner and _PROMPT not in banner:
+        raise PiDP11Busy("PiDP-11 console busy: all remote connections are in use")
+
+
+def _enable_keepalive(writer: asyncio.StreamWriter) -> None:
+    """Have the kernel notice a dead peer on the long-lived stream."""
+    sock = writer.get_extra_info("socket")
+    if sock is None:
+        return
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        for name, value in (("TCP_KEEPIDLE", 30), ("TCP_KEEPINTVL", 10), ("TCP_KEEPCNT", 3)):
+            opt = getattr(socket, name, None)
+            if opt is not None:
+                sock.setsockopt(socket.IPPROTO_TCP, opt, value)
+    except OSError:
+        pass
+
+
+async def _release(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    """Close a transient connection and wait for the shim to confirm it is gone.
+
+    Half-close, then read to EOF: the shim answers by closing its SimH connection
+    and then ours. Only then is SimH's slot actually free, so the next poll or
+    command cannot overlap with this one and push the integration past its budget.
+    The wait is bounded, and the socket is closed whatever happens.
+    """
+    try:
+        if not writer.is_closing():
+            writer.write_eof()
+            async with asyncio.timeout(_RELEASE_TIMEOUT):
+                while await reader.read(4096):
+                    pass
+    except Exception:
+        pass
+    finally:
+        _close(writer)
 
 
 def _close(writer: asyncio.StreamWriter) -> None:

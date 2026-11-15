@@ -1,5 +1,10 @@
 # Sprint 4 — GPIO + Multi-arch Release
 
+
+> **Entity ids:** the device "PiDP-11" slugs to `pidp_11`, so the real ids are `pidp_11_*`
+> (e.g. `sensor.pidp_11_cpu_state`). The `pidp11_*` ids below are historical; installs made
+> with an older slug may still have them. Do not copy them verbatim.
+
 **Owner:** TBD. **Status:** hardware-complete (all checklist items confirmed Jun 21 2026; CI image build + release tag deferred to v1.0.0).
 
 ## Goal

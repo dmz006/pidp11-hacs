@@ -8,14 +8,30 @@ Also serves a watch stream on WATCH_PORT (default 2225) that streams SR register
 changes in near-real-time by maintaining a single long-lived SimH connection.
 
 Also serves a lamp stream on LAMP_PORT (default 2226) that streams PC/PSW register
-values at ~20 Hz for the Lovelace live animation.
+values at ~20 Hz for the Lovelace live animation. A client that authenticates with
+    AUTH <secret> +sr\n
+gets the SR register on the same stream (``EVENT sr value=<octal>`` lines), so one
+connection can carry everything the integration needs.
+
+Connection budget: every client of this shim holds one SimH remote-console
+connection, and SimH only accepts a fixed number of them. Every boot.ini in
+this repo sets ``set remote connections=4``; past that SimH answers
+"All connections busy" and hangs up. So the backend connection must be released
+as soon as the client side is gone, whatever way it went (FIN, RST, silence).
+Each handler therefore closes its backend connection in a ``finally`` block, the
+stream handlers watch the client side for EOF instead of waiting for a write to
+fail (they only write when a register changes, which on a quiet machine is
+never), and the proxy closes sessions that have been idle for IDLE_TIMEOUT.
 
 Wire protocol is documented in docs/contracts/remote-console.md.
 """
 import asyncio
+import hmac
 import os
 import re
+import socket
 import sys
+from collections.abc import Awaitable, Callable
 
 LISTEN_PORT = int(os.environ.get("AUTHSHIM_PORT", "2223"))
 SIMH_PORT   = int(os.environ.get("SIMH_PORT",     "2224"))
@@ -24,12 +40,28 @@ AUTH_TIMEOUT = 5.0
 VERSION = "1.0.0"
 
 _PROMPT = b"sim> "
+_BUSY = b"All connections busy"  # what SimH says when `remote connections=N` is used up
 _CONNECT_TIMEOUT = 5.0
 _DRAIN_QUIET = 0.3
+_CLOSE_TIMEOUT = 2.0
+_WRITE_TIMEOUT = 10.0
 WATCH_PORT = int(os.environ.get("WATCH_PORT", str(LISTEN_PORT + 2)))
 WATCH_INTERVAL_MS = float(os.environ.get("WATCH_INTERVAL_MS", "250"))
 LAMP_PORT = int(os.environ.get("LAMP_PORT", str(LISTEN_PORT + 3)))
 LAMP_INTERVAL_MS = float(os.environ.get("LAMP_INTERVAL_MS", "50"))  # 20 Hz
+# A proxied session with no traffic in either direction for this long is closed
+# so a vanished client cannot hold a SimH connection forever.
+IDLE_TIMEOUT = float(os.environ.get("IDLE_TIMEOUT", "3600"))
+# Streams send a comment line when nothing else was written for this long. It
+# lets the shim notice a dead client by the failed write, and tells the client
+# the shim is alive.
+HEARTBEAT_INTERVAL = float(os.environ.get("HEARTBEAT_INTERVAL", "15"))
+
+_FLAG_SR = "+sr"
+
+
+class _BackendGone(Exception):
+    """SimH stopped answering (closed, reset or timed out)."""
 
 
 def _load_secret() -> str:
@@ -50,20 +82,107 @@ def _parse_sr(text: str) -> str | None:
     return None
 
 
-async def _drain_simh_banner(reader: asyncio.StreamReader) -> None:
-    """Read until sim> prompt, then drain until quiet."""
+# ── Connection hygiene ────────────────────────────────────────────────────────
+
+def _enable_keepalive(writer: asyncio.StreamWriter) -> None:
+    """Make the kernel notice a client that vanished without a FIN or RST."""
+    sock = writer.get_extra_info("socket")
+    if sock is None:
+        return
     try:
-        await asyncio.wait_for(reader.readuntil(_PROMPT), timeout=_CONNECT_TIMEOUT)
-    except (TimeoutError, asyncio.IncompleteReadError):
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        for name, value in (("TCP_KEEPIDLE", 30), ("TCP_KEEPINTVL", 10), ("TCP_KEEPCNT", 3)):
+            opt = getattr(socket, name, None)
+            if opt is not None:
+                sock.setsockopt(socket.IPPROTO_TCP, opt, value)
+    except OSError:
         pass
+
+
+async def _close(writer: asyncio.StreamWriter | None) -> None:
+    """Close a stream and give the transport a moment to finish; never raises."""
+    if writer is None:
+        return
+    try:
+        writer.close()
+    except Exception:
+        return
+    try:
+        await asyncio.wait_for(writer.wait_closed(), timeout=_CLOSE_TIMEOUT)
+    except Exception:
+        try:
+            writer.transport.abort()
+        except Exception:
+            pass
+
+
+def _client_gone(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> bool:
+    """True once the client has closed (FIN), reset (RST) or been closed by us.
+
+    ``writer.is_closing()`` alone misses a graceful FIN: asyncio keeps the
+    transport open for a half-close, so the only sign is EOF on the reader.
+    """
+    return writer.is_closing() or reader.at_eof() or reader.exception() is not None
+
+
+async def _open_simh() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+    return await asyncio.wait_for(
+        asyncio.open_connection("127.0.0.1", SIMH_PORT),
+        timeout=_CONNECT_TIMEOUT,
+    )
+
+
+async def _authenticate(
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+) -> frozenset[str] | None:
+    """Read and check the AUTH line.
+
+    Returns the set of ``+flag`` options the client asked for (usually empty), or
+    None after answering DENY. ``AUTH <secret>`` is the whole protocol for old
+    clients; flags follow the secret after a space.
+    """
+    try:
+        raw = await asyncio.wait_for(reader.readline(), timeout=AUTH_TIMEOUT)
+    except TimeoutError:
+        writer.write(b"DENY auth-timeout\n")
+        await writer.drain()
+        return None
+
+    line = raw.decode(errors="replace").rstrip("\r\n")
+    if line.startswith("AUTH "):
+        rest = line[len("AUTH "):].encode()
+        secret = _load_secret().encode()
+        if hmac.compare_digest(rest, secret):
+            return frozenset()
+        n = len(secret)
+        if rest[n : n + 1] == b" " and hmac.compare_digest(rest[:n], secret):
+            flags = rest[n + 1 :].decode(errors="replace").split()
+            return frozenset(w for w in flags if w.startswith("+"))
+    writer.write(b"DENY bad-auth\n")
+    await writer.drain()
+    return None
+
+
+# ── SimH helpers ──────────────────────────────────────────────────────────────
+
+async def _drain_simh_banner(reader: asyncio.StreamReader) -> bytes:
+    """Read until sim> prompt, then drain until quiet. Returns everything read."""
+    buf = bytearray()
+    try:
+        buf.extend(await asyncio.wait_for(reader.readuntil(_PROMPT), timeout=_CONNECT_TIMEOUT))
+    except (TimeoutError, asyncio.IncompleteReadError) as exc:
+        if isinstance(exc, asyncio.IncompleteReadError):
+            buf.extend(exc.partial)
     # Drain remaining buffered data until quiet
     while True:
         try:
             chunk = await asyncio.wait_for(reader.read(4096), timeout=_DRAIN_QUIET)
             if not chunk:
                 break
+            buf.extend(chunk)
         except TimeoutError:
             break
+    return bytes(buf)
 
 
 async def _poll_register(
@@ -71,105 +190,159 @@ async def _poll_register(
     simh_w: asyncio.StreamWriter,
     cmd: str,
 ) -> str | None:
-    """Send one EXAMINE command, read to sim>, return parsed register value."""
-    simh_w.write(f"{cmd}\n".encode())
-    await simh_w.drain()
+    """Send one EXAMINE command, read to sim>, return parsed register value.
+
+    Returns None when the reply had no register in it; raises _BackendGone when
+    SimH is no longer there to answer.
+    """
     try:
+        simh_w.write(f"{cmd}\n".encode())
+        await simh_w.drain()
         raw = await asyncio.wait_for(simh_r.readuntil(_PROMPT), timeout=_CONNECT_TIMEOUT)
-    except (TimeoutError, asyncio.IncompleteReadError):
-        return None
+    except (TimeoutError, OSError, asyncio.IncompleteReadError) as exc:
+        raise _BackendGone(cmd) from exc
     text = raw[: -len(_PROMPT)].decode(errors="replace")
     return _parse_sr(text)
 
 
-async def _handle_watch(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-    """Handle a watch stream connection.
+# ── Streams (watch + lamps) ───────────────────────────────────────────────────
 
-    Protocol:
-    1. Client sends AUTH <secret>\\n
+# One polling step: returns the lines to send (possibly none) or None to end the stream.
+_Step = Callable[[], Awaitable[list[bytes] | None]]
+_StepFactory = Callable[[asyncio.StreamReader, asyncio.StreamWriter, frozenset[str]], _Step]
+
+
+async def _stream_session(
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    label: str,
+    interval_s: float,
+    make_step: _StepFactory,
+) -> None:
+    """Common life cycle of a watch or lamp stream.
+
+    1. Client sends AUTH <secret>[ +flags]\\n
     2. Server responds OK\\n
-    3. Server opens dedicated SimH connection, drains banner
-    4. Server polls EXAMINE SR every WATCH_INTERVAL_MS ms, streams
-       EVENT sr value=<octal>\\n on initial connect and on change
-    5. Connection kept alive until client disconnects
+    3. Server opens one dedicated SimH connection, drains the banner
+    4. Server polls on an interval and streams EVENT lines; sends a comment
+       heartbeat when quiet
+    5. Ends when the client goes away (EOF, reset, write failure) or SimH does;
+       the SimH connection is always closed on the way out
     """
     peer = writer.get_extra_info("peername")
+    simh_w: asyncio.StreamWriter | None = None
     try:
-        try:
-            raw = await asyncio.wait_for(reader.readline(), timeout=AUTH_TIMEOUT)
-        except TimeoutError:
-            writer.write(b"DENY auth-timeout\n")
-            await writer.drain()
-            return
-
-        parts = raw.decode(errors="replace").rstrip("\r\n").split(" ", 1)
-        if len(parts) != 2 or parts[0] != "AUTH" or parts[1] != _load_secret():
-            writer.write(b"DENY bad-auth\n")
-            await writer.drain()
+        _enable_keepalive(writer)
+        flags = await _authenticate(reader, writer)
+        if flags is None:
             return
 
         writer.write(b"OK\n")
         await writer.drain()
 
         try:
-            simh_r, simh_w = await asyncio.wait_for(
-                asyncio.open_connection("127.0.0.1", SIMH_PORT),
-                timeout=_CONNECT_TIMEOUT,
-            )
-        except (TimeoutError, ConnectionRefusedError):
+            simh_r, simh_w = await _open_simh()
+        except (TimeoutError, OSError):
             # SimH not available — close silently
             return
 
-        try:
-            await _drain_simh_banner(simh_r)
+        banner = await _drain_simh_banner(simh_r)
+        if _BUSY in banner:
+            print(
+                f"[authshim] {label} stream from {peer}: SimH has no free remote connection",
+                file=sys.stderr,
+                flush=True,
+            )
+            return
 
-            prev_sr: str | None = None
-            interval_s = WATCH_INTERVAL_MS / 1000.0
+        step = make_step(simh_r, simh_w, flags)
+        loop = asyncio.get_running_loop()
+        last_write = loop.time()
+        while not _client_gone(reader, writer):
+            lines = await step()
+            if lines is None:
+                break
+            now = loop.time()
+            wrote = bool(lines)
+            for line in lines:
+                writer.write(line)
+            if not wrote and now - last_write >= HEARTBEAT_INTERVAL:
+                writer.write(b"# keepalive\n")
+                wrote = True
+            if wrote:
+                last_write = now
+                await asyncio.wait_for(writer.drain(), timeout=_WRITE_TIMEOUT)
+            await asyncio.sleep(interval_s)
 
-            while True:
-                # Check if client disconnected
-                if writer.is_closing():
-                    break
-
-                simh_w.write(b"EXAMINE SR\n")
-                await simh_w.drain()
-
-                # Read response up to the next sim> prompt
-                try:
-                    raw_resp = await asyncio.wait_for(
-                        simh_r.readuntil(_PROMPT), timeout=_CONNECT_TIMEOUT
-                    )
-                except (TimeoutError, asyncio.IncompleteReadError):
-                    break
-
-                text = raw_resp[: -len(_PROMPT)].decode(errors="replace")
-                sr = _parse_sr(text)
-
-                if sr is not None and (prev_sr is None or sr != prev_sr):
-                    event_line = f"EVENT sr value={sr}\n".encode()
-                    writer.write(event_line)
-                    await writer.drain()
-                    prev_sr = sr
-
-                await asyncio.sleep(interval_s)
-
-        finally:
-            try:
-                simh_w.close()
-                await simh_w.wait_closed()
-            except Exception:
-                pass
-
-    except (ConnectionResetError, BrokenPipeError, asyncio.IncompleteReadError):
+    except (OSError, asyncio.IncompleteReadError, _BackendGone):
         pass
     except Exception as exc:
-        print(f"[authshim] watch error from {peer}: {exc}", file=sys.stderr, flush=True)
+        print(f"[authshim] {label} error from {peer}: {exc}", file=sys.stderr, flush=True)
     finally:
-        try:
-            writer.close()
-            await writer.wait_closed()
-        except Exception:
-            pass
+        await _close(simh_w)
+        await _close(writer)
+
+
+def _watch_step(
+    simh_r: asyncio.StreamReader, simh_w: asyncio.StreamWriter, _flags: frozenset[str]
+) -> _Step:
+    prev_sr: str | None = None
+
+    async def step() -> list[bytes] | None:
+        nonlocal prev_sr
+        sr = await _poll_register(simh_r, simh_w, "EXAMINE SR")
+        if sr is not None and sr != prev_sr:
+            prev_sr = sr
+            return [f"EVENT sr value={sr}\n".encode()]
+        return []
+
+    return step
+
+
+def _lamp_step(
+    simh_r: asyncio.StreamReader, simh_w: asyncio.StreamWriter, flags: frozenset[str]
+) -> _Step:
+    with_sr = _FLAG_SR in flags
+    # SR changes at human speed; look at it on the watch cadence, not the lamp one.
+    sr_every = max(1, round(WATCH_INTERVAL_MS / LAMP_INTERVAL_MS))
+    prev_pc: str | None = None
+    prev_ps: str | None = None
+    prev_sr: str | None = None
+    cycle = 0
+
+    async def step() -> list[bytes] | None:
+        nonlocal prev_pc, prev_ps, prev_sr, cycle
+        out: list[bytes] = []
+
+        pc = await _poll_register(simh_r, simh_w, "EXAMINE PC")
+        if pc is None:
+            return None
+        ps = await _poll_register(simh_r, simh_w, "EXAMINE PSW")
+        if ps is None:
+            return None
+
+        if with_sr and cycle % sr_every == 0:
+            sr = await _poll_register(simh_r, simh_w, "EXAMINE SR")
+            if sr is not None and sr != prev_sr:
+                prev_sr = sr
+                out.append(f"EVENT sr value={sr}\n".encode())
+        cycle += 1
+
+        if prev_pc is None or pc != prev_pc or ps != prev_ps:
+            out.append(f"EVENT lamps ADDRESS={pc} DATA={ps}\n".encode())
+            prev_pc = pc
+            prev_ps = ps
+        return out
+
+    return step
+
+
+async def _handle_watch(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    """Handle a watch stream connection.
+
+    Streams ``EVENT sr value=<octal>`` on initial connect and on change.
+    """
+    await _stream_session(reader, writer, "watch", WATCH_INTERVAL_MS / 1000.0, _watch_step)
 
 
 async def _handle_lamp_stream(
@@ -177,117 +350,46 @@ async def _handle_lamp_stream(
 ) -> None:
     """Handle a lamp stream connection.
 
-    Protocol:
-    1. Client sends AUTH <secret>\\n
-    2. Server responds OK\\n
-    3. Server opens dedicated SimH connection, drains banner
-    4. Server polls EXAMINE PC + EXAMINE PSW every LAMP_INTERVAL_MS ms, streams
-       EVENT lamps ADDRESS=<pc> DATA=<psw>\\n on change
-    5. Connection kept alive until client disconnects
+    Streams ``EVENT lamps ADDRESS=<pc> DATA=<psw>`` on change, and with the
+    ``+sr`` flag also ``EVENT sr value=<octal>`` on change.
     """
-    peer = writer.get_extra_info("peername")
-    try:
-        try:
-            raw = await asyncio.wait_for(reader.readline(), timeout=AUTH_TIMEOUT)
-        except TimeoutError:
-            writer.write(b"DENY auth-timeout\n")
-            await writer.drain()
-            return
-
-        parts = raw.decode(errors="replace").rstrip("\r\n").split(" ", 1)
-        if len(parts) != 2 or parts[0] != "AUTH" or parts[1] != _load_secret():
-            writer.write(b"DENY bad-auth\n")
-            await writer.drain()
-            return
-
-        writer.write(b"OK\n")
-        await writer.drain()
-
-        try:
-            simh_r, simh_w = await asyncio.wait_for(
-                asyncio.open_connection("127.0.0.1", SIMH_PORT),
-                timeout=_CONNECT_TIMEOUT,
-            )
-        except (TimeoutError, ConnectionRefusedError):
-            return
-
-        try:
-            await _drain_simh_banner(simh_r)
-
-            prev_pc: str | None = None
-            prev_ps: str | None = None
-            interval_s = LAMP_INTERVAL_MS / 1000.0
-
-            while True:
-                if writer.is_closing():
-                    break
-
-                pc = await _poll_register(simh_r, simh_w, "EXAMINE PC")
-                if pc is None:
-                    break
-                ps = await _poll_register(simh_r, simh_w, "EXAMINE PSW")
-                if ps is None:
-                    break
-
-                if prev_pc is None or pc != prev_pc or ps != prev_ps:
-                    writer.write(f"EVENT lamps ADDRESS={pc} DATA={ps}\n".encode())
-                    await writer.drain()
-                    prev_pc = pc
-                    prev_ps = ps
-
-                await asyncio.sleep(interval_s)
-
-        finally:
-            try:
-                simh_w.close()
-                await simh_w.wait_closed()
-            except Exception:
-                pass
-
-    except (ConnectionResetError, BrokenPipeError, asyncio.IncompleteReadError):
-        pass
-    except Exception as exc:
-        print(f"[authshim] lamp error from {peer}: {exc}", file=sys.stderr, flush=True)
-    finally:
-        try:
-            writer.close()
-            await writer.wait_closed()
-        except Exception:
-            pass
+    await _stream_session(reader, writer, "lamp", LAMP_INTERVAL_MS / 1000.0, _lamp_step)
 
 
-async def _pipe(src: asyncio.StreamReader, dst: asyncio.StreamWriter) -> None:
+# ── Plain proxy ───────────────────────────────────────────────────────────────
+
+async def _pipe(
+    src: asyncio.StreamReader, dst: asyncio.StreamWriter, activity: list[float]
+) -> None:
+    """Copy src to dst until EOF, error or IDLE_TIMEOUT without traffic either way.
+
+    ``activity`` is shared by both directions: one holds the timestamp of the last
+    byte moved by either, so a session that is only receiving is not idle.
+    """
+    loop = asyncio.get_running_loop()
     try:
         while True:
-            data = await src.read(4096)
+            try:
+                data = await asyncio.wait_for(src.read(4096), timeout=IDLE_TIMEOUT)
+            except TimeoutError:
+                if loop.time() - activity[0] >= IDLE_TIMEOUT:
+                    return
+                continue
             if not data:
-                break
+                return
+            activity[0] = loop.time()
             dst.write(data)
             await dst.drain()
-    except (ConnectionResetError, BrokenPipeError, asyncio.IncompleteReadError):
+    except (OSError, asyncio.IncompleteReadError):
         pass
-    finally:
-        try:
-            dst.close()
-            await dst.wait_closed()
-        except Exception:
-            pass
 
 
 async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
     peer = writer.get_extra_info("peername")
+    simh_w: asyncio.StreamWriter | None = None
     try:
-        try:
-            raw = await asyncio.wait_for(reader.readline(), timeout=AUTH_TIMEOUT)
-        except TimeoutError:
-            writer.write(b"DENY auth-timeout\n")
-            await writer.drain()
-            return
-
-        parts = raw.decode(errors="replace").rstrip("\r\n").split(" ", 1)
-        if len(parts) != 2 or parts[0] != "AUTH" or parts[1] != _load_secret():
-            writer.write(b"DENY bad-auth\n")
-            await writer.drain()
+        _enable_keepalive(writer)
+        if await _authenticate(reader, writer) is None:
             return
 
         writer.write(b"OK\n")
@@ -295,22 +397,34 @@ async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) ->
         await writer.drain()
 
         try:
-            simh_r, simh_w = await asyncio.open_connection("127.0.0.1", SIMH_PORT)
-        except ConnectionRefusedError:
+            simh_r, simh_w = await _open_simh()
+        except (TimeoutError, OSError):
             writer.write(b"# SimH remote console not available yet -- is SimH running?\n")
             await writer.drain()
             return
 
-        await asyncio.gather(_pipe(reader, simh_w), _pipe(simh_r, writer))
+        # Either direction ending (EOF, reset, error, idle) ends the session, and
+        # the other direction is cancelled; both ends are closed below, so neither a
+        # vanished client nor a vanished SimH can leave the other half open.
+        activity = [asyncio.get_running_loop().time()]
+        pumps = [
+            asyncio.ensure_future(_pipe(reader, simh_w, activity)),
+            asyncio.ensure_future(_pipe(simh_r, writer, activity)),
+        ]
+        try:
+            await asyncio.wait(pumps, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for p in pumps:
+                p.cancel()
+            await asyncio.gather(*pumps, return_exceptions=True)
 
+    except OSError:
+        pass
     except Exception as exc:
         print(f"[authshim] error from {peer}: {exc}", file=sys.stderr, flush=True)
     finally:
-        try:
-            writer.close()
-            await writer.wait_closed()
-        except Exception:
-            pass
+        await _close(simh_w)
+        await _close(writer)
 
 
 async def _main() -> None:

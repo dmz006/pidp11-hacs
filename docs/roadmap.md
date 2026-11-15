@@ -1,5 +1,10 @@
 # Roadmap
 
+
+> **Entity ids:** the device "PiDP-11" slugs to `pidp_11`, so the real ids are `pidp_11_*`
+> (e.g. `sensor.pidp_11_cpu_state`). The `pidp11_*` ids below are historical; installs made
+> with an older slug may still have them. Do not copy them verbatim.
+
 v1 scope is "PiDP-11 on HAOS works exactly like on Pi OS, plus basic
 HA observability." Everything else is here. Items are R-numbered so we
 can reference them in commits and issues.

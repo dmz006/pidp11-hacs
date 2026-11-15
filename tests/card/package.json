@@ -1,0 +1,10 @@
+{
+  "name": "pidp11-card-tests",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Browser-free DOM tests for the PiDP-11 Lovelace card. Run by tests/integration/test_card_element.py.",
+  "license": "MIT",
+  "devDependencies": {
+    "jsdom": "26.1.0"
+  }
+}

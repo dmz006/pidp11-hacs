@@ -1,5 +1,10 @@
 # Sprint 5 — Lamps, Switches, and Lovelace Front-Panel Dashboard
 
+
+> **Entity ids:** the device "PiDP-11" slugs to `pidp_11`, so the real ids are `pidp_11_*`
+> (e.g. `sensor.pidp_11_cpu_state`). The `pidp11_*` ids below are historical; installs made
+> with an older slug may still have them. Do not copy them verbatim.
+
 **Owner:** TBD. **Status:** partial — Lovelace card + SR sensors + switch events shipped Jun 21 2026. Phase 2 (60 Hz lamps) deferred to v1.4 / S6.
 
 ## Goal

@@ -44,7 +44,15 @@ Container image built from `debian:bookworm-slim`:
 - **Watch stream** listens on `:2225` (host `:2225`). Same auth handshake, then
   polls SimH `EXAMINE SR` every 250 ms and streams `EVENT sr value=<octal>` when
   the SR register changes. Allows the integration to detect switch changes without
-  waiting for the 5 s coordinator poll.
+  waiting for the 5 s coordinator poll. Kept for older clients; the integration
+  now uses the lamp stream on `:2226` with `AUTH <secret> +sr`, which carries the
+  lamp values and the SR events on one connection.
+- **Connection model**: every shim client (console proxy, watch stream, lamp
+  stream) holds exactly one SimH connection on `:2224`, of which SimH allows 4.
+  The shim closes that backend connection in a `finally` as soon as its client
+  goes (FIN, RST, or `IDLE_TIMEOUT` of silence), so stale sessions do not eat
+  the budget. Integration: 1 stream + at most 1 transient = 2; the rest are for
+  people on a console.
 - **zeroconf advertisement** (`zeroconf_advertise.py`) runs as a background process,
   advertising `_pidp11._tcp.local.` on the LAN IP so HA can auto-discover the Pi.
 - **Disk images**: symlinked from `/share/pidp11/disks/` (bind-mount
@@ -66,8 +74,14 @@ port (default 2223). Provides:
 - `config_flow.py` — user-initiated setup (host, port, shared secret) plus
   `async_step_zeroconf` / `async_step_zeroconf_confirm` for mDNS auto-discovery.
 - `coordinator.py` — `DataUpdateCoordinator` polling every 5 s for
-  `PiDP11State(cpu_state, pc, psw, sr, cpu_mode, system)`. Also maintains a
-  background watch-stream task (`_run_sr_watch`) on port 2225 for 250 ms SR updates.
+  `PiDP11State(cpu_state, pc, psw, sr, cpu_mode, system)`. Also maintains one
+  long-lived stream task (`_run_stream`) on the lamp port (2226, `AUTH <secret> +sr`)
+  that carries both the lamp values and 250 ms SR updates. SimH only accepts
+  `remote connections=4` (set in every `boot.ini`), so the integration keeps to a
+  budget of 2: that one stream plus one transient connection for a poll or a
+  service command at a time. Connections are always closed in a `finally`, the
+  stream is cancelled on unload, and when SimH answers "All connections busy" the
+  poll backs off and the entities keep their last values.
 - `sensor.py` — `cpu_state`, `pc`, `psw`, `system`, `sr` (+ binary/decimal/bit
   attributes), `cpu_mode` (kernel/supervisor/user).
 - `binary_sensor.py` — `halted`, plus 22 SR bit sensors `SR0`–`SR21`.
@@ -97,10 +111,10 @@ See `docs/diagrams.md` for rendered diagrams.
 - **HA control path**: automation → HA service `pidp11.boot` →
   integration → TCP :2223 (auth shim) → SimH remote console → response → HA
   entity state update.
-- **Watch stream path**: coordinator background task → TCP :2225 (watch stream)
+- **Watch stream path**: coordinator background task → TCP :2226 (lamp stream, `AUTH <secret> +sr`; :2225 stays for old clients)
   → auth shim polls `EXAMINE SR` every 250 ms → `EVENT sr value=<octal>` → coordinator
   fires `pidp11_sr_changed` + per-bit `pidp11_switch_changed` events + updates
-  `binary_sensor.pidp11_sr0`–`sr21` immediately via `async_set_updated_data`.
+  `binary_sensor.pidp_11_sr0`–`sr21` (the "PiDP-11" device slugs to `pidp_11`) immediately via `async_set_updated_data`.
 - **GPIO path**: SimH process inside container → ONC RPC → blinkenlightd →
   `/dev/mem` mmap → RP1 IO_BANK / PADS_BANK registers → ribbon cable → PiDP-11 lamps &
   switches.

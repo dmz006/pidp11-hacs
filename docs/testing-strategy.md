@@ -8,9 +8,15 @@ Every line of shipped code was preceded by a failing test. No exceptions.
 | ------------------ | ---------------------------------------------- | ----------------------------- | ---------- | ---------------- |
 | Schema / manifest  | `pytest` + json-schema                         | `tests/integration/schema/`   | ✓          | —                |
 | Integration (HA)   | `pytest-homeassistant-custom-component`        | `tests/integration/`          | ✓          | —                |
+| Card (DOM)         | Node.js + jsdom, driven by `pytest`            | `tests/card/` + `tests/integration/test_card_*.py` | ✓ (needs `npm ci` in `tests/card`) | — |
 | Protocol contract  | `pytest` with mock TCP server                  | `tests/integration/protocol/` | ✓          | —                |
 | Add-on container   | `pytest` + `testcontainers`                    | `tests/addon/`                | ✓          | —                |
 | Hardware-in-loop   | Human checklist, signed                        | `tests/hardware/`             | ✗          | ✓                |
+
+Related suites: `tests/integration/test_connection_budget.py` checks that no
+SimH connection is left open (poll, command, stream, cancel, unload) and that a
+busy SimH keeps the last values; `test_authshim.py` covers the shim's idle
+timeout, heartbeat and `+sr` handling.
 
 ## 2. TDD workflow
 

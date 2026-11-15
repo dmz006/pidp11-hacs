@@ -39,7 +39,7 @@ Or click **Add Card → PiDP-11 Front Panel** in the Lovelace card picker.
 | **ADDRESS** (22 LEDs) | `EXAMINE PC` — 20 Hz live | Program counter as 22 binary LEDs in groups `[1,3,3,3,3,3,3,3]` (bits 21–0, MSB left). Updates at up to 20 Hz via the lamp push stream on port 2226. |
 | **DATA** (16 LEDs) | `EXAMINE PSW` — 20 Hz live | Processor status word as 16 binary LEDs in 4 groups of 4. Interrupt level in bits 7–5, condition codes in bits 3–0. Same 20 Hz stream as ADDRESS. |
 | **PARITY H/L** | *(no source)* | Always dark — SimH does not expose parity. |
-| **SR switches** (22) | `binary_sensor.pidp11_sr0`–`sr21` | Physical SR switch positions, updated via 250 ms push stream (port 2225). Toggle-knob style; knob at top = ON. |
+| **SR switches** (22) | `binary_sensor.pidp_11_sr0`–`sr21` | Physical SR switch positions, updated via the 250 ms SR events carried on the lamp stream (port 2226, `AUTH <secret> +sr`). Toggle-knob style; knob at top = ON. |
 | **ADDR SELECT** | *(hardcoded)* | Shows PROG PHY active — always, because we EXAMINE PC. |
 | **DATA SELECT** | *(hardcoded)* | Shows DISPLAY REGISTER active — always, because we EXAMINE PSW. |
 
@@ -49,19 +49,24 @@ ADDRESS and DATA LEDs animate at **up to 20 Hz** via the dedicated lamp stream (
 The 5 s coordinator tick still updates status indicators, CPU mode, system name, and SR
 switch positions.
 
+If the card shows no values, see [Troubleshooting](#troubleshooting).
+
 ### Optional entity overrides
 
 The card defaults to the entity IDs the integration creates automatically. Override any
-of them if you've renamed your device:
+of them if you've renamed your device. The integration's device is called "PiDP-11", which
+Home Assistant slugs to `pidp_11`, so every entity id starts with `pidp_11_`. If a
+configured or default entity id is not found, the card also tries the older `pidp11` slug
+and `_2` duplicates, so most installs need no overrides:
 
 ```yaml
 type: custom:pidp11-panel-card
-state_entity:    sensor.pidp11_cpu_state
-pc_entity:       sensor.pidp11_pc
-psw_entity:      sensor.pidp11_psw
-system_entity:   sensor.pidp11_system
-sr_prefix:       binary_sensor.pidp11_sr    # appended with 0..21
-cpu_mode_entity: sensor.pidp11_cpu_mode
+state_entity:    sensor.pidp_11_cpu_state
+pc_entity:       sensor.pidp_11_pc
+psw_entity:      sensor.pidp_11_psw
+system_entity:   sensor.pidp_11_system
+sr_prefix:       binary_sensor.pidp_11_sr    # appended with 0..21
+cpu_mode_entity: sensor.pidp_11_cpu_mode
 ```
 
 ---
@@ -73,7 +78,7 @@ different channels:
 
 | Artifact | Channel | What it does |
 |----------|---------|--------------|
-| **`pidp11-addon/`** | Supervisor add-on or standalone Docker | Container running SimH + GPIO lamp/switch driver (`pidp1170_blinkenlightd`) + auth shim (port 2223) + SR watch stream (port 2225) + mDNS advertisement + SSH console. |
+| **`pidp11-addon/`** | Supervisor add-on or standalone Docker | Container running SimH + GPIO lamp/switch driver (`pidp1170_blinkenlightd`) + auth shim (port 2223) + lamp stream with SR events (port 2226; the older SR-only watch stream on 2225 remains for old clients) + mDNS advertisement + SSH console. |
 | **`custom_components/pidp11/`** | HACS Integration | Python integration exposing HA entities, services, and the Lovelace card. Connects to the add-on over TCP (local `127.0.0.1:2223` or remote Pi IP via mDNS auto-discovery). |
 
 The add-on includes a boot-select encoder: at startup it reads the front-panel SR
@@ -208,10 +213,15 @@ Until Home Assistant has the new secret, the sensors show the device as offline.
 
 ### Troubleshooting
 
+For the full step-by-step check list while the integration runs in Home Assistant, see
+[How to debug the integration in Home Assistant](docs/howto-debug-integration-in-home-assistant.md).
+
 | Message | Meaning | Fix |
 |---------|---------|-----|
 | **Shared secret rejected** (`invalid_auth`) | The add-on was reached and answered `DENY bad-auth`, so host and port are right and the secret is wrong. | Re-read the secret on the Pi with `sudo docker exec pidp11 cat /data/remote_console.secret` and paste it without spaces or a trailing newline. A secret from an old install no longer matches if the data volume was recreated. |
 | **Cannot connect** (`cannot_connect`) | Nothing answered on the host and port. | Check the container is running (`sudo docker ps`), the port is `2223`, and the host's firewall or a different subnet is not blocking it from Home Assistant. |
+| **Card is blank or shows `—` / offline** | The card could not find the integration's entities (renamed device or different slug), or the integration has no data yet. | Open Developer Tools → States and search `pidp_11`. If the ids differ from the defaults, set the overrides in [Optional entity overrides](#optional-entity-overrides). |
+| **"All connections busy" in the Home Assistant log** | SimH accepts only 4 remote-console connections (`set remote connections=4` in every `boot.ini`) and all are in use, e.g. by open `telnet` sessions. | Close extra console sessions. The integration keeps to 2 connections, retries the poll up to 3 times with doubling backoff (1 s, 2 s, 4 s; the code caps any single wait at 8 s, which 3 retries never reach) and keeps the last values meanwhile, so entities stay put rather than going unavailable. It logs one warning per outage. |
 | **Custom element doesn't exist: pidp11-panel-card** | The card script is registered when the integration is set up, and it is not. | Add the device first (above), restart Home Assistant after a HACS install or update, then reload the browser tab. |
 
 Check the secret from any machine that can reach the Pi, without printing it:
@@ -244,19 +254,19 @@ is right there. Type `HALT`, then `EXAMINE PC`, then `CONTINUE` — watch the LE
 
 | Entity | What it shows |
 |--------|---------------|
-| `sensor.pidp11_cpu_state` | `running` / `halted` / `offline` |
-| `sensor.pidp11_pc` | Program counter (octal) |
-| `sensor.pidp11_psw` | Processor status word (octal) |
-| `sensor.pidp11_system` | Booted OS: `idled`, `211bsd`, `rsx11mp`, … |
-| `sensor.pidp11_cpu_mode` | `kernel` / `supervisor` / `user` (from PSW bits 15–14) |
-| `sensor.pidp11_sr` | Switch register (octal) with per-bit attributes `SR0`–`SR21` |
+| `sensor.pidp_11_cpu_state` | `running` / `halted` / `offline` |
+| `sensor.pidp_11_pc` | Program counter (octal) |
+| `sensor.pidp_11_psw` | Processor status word (octal) |
+| `sensor.pidp_11_system` | Booted OS: `idled`, `211bsd`, `rsx11mp`, … |
+| `sensor.pidp_11_cpu_mode` | `kernel` / `supervisor` / `user` (from PSW bits 15–14) |
+| `sensor.pidp_11_switch_register` | Switch register (octal) with per-bit attributes `SR0`–`SR21` |
 
 ### Binary sensors
 
 | Entity | What it shows |
 |--------|---------------|
-| `binary_sensor.pidp11_halted` | `on` when CPU is halted |
-| `binary_sensor.pidp11_sr0` – `binary_sensor.pidp11_sr21` | Individual front-panel switch positions (22 sensors, updated via 250 ms push stream) |
+| `binary_sensor.pidp_11_cpu_halted` | `on` when CPU is halted |
+| `binary_sensor.pidp_11_sr0` – `binary_sensor.pidp_11_sr21` | Individual front-panel switch positions (22 sensors, updated via 250 ms push stream) |
 
 ### Services
 
@@ -272,20 +282,20 @@ is right there. Type `HALT`, then `EXAMINE PC`, then `CONTINUE` — watch the LE
 
 | Event | Payload | When fired |
 |-------|---------|------------|
-| `pidp11_sr_changed` | `{ sr_old, sr_new }` | SR register changes (from watch stream or 5 s poll) |
-| `pidp11_switch_changed` | `{ switch: "SR<N>", state: bool }` | Individual SR bit edge (from watch stream) |
+| `pidp11_sr_changed` | `{ sr_old, sr_new }` | SR register changes (from the stream or 5 s poll) |
+| `pidp11_switch_changed` | `{ switch: "SR<N>", state: bool }` | Individual SR bit edge (from the stream) |
 | `pidp11_lamps` | `{ ADDRESS: "xxxxxx", DATA: "xxxxxx" }` | PC and PSW snapshot (octal), fired up to 20 Hz by the lamp stream; consumed by the Lovelace card for live LED animation |
 
 Example automation — announce when the PDP-11 halts:
 ```yaml
 trigger:
   - platform: state
-    entity_id: sensor.pidp11_cpu_state
+    entity_id: sensor.pidp_11_cpu_state
     to: halted
 action:
   - service: notify.mobile_app
     data:
-      message: "The PDP-11 just halted at PC {{ states('sensor.pidp11_pc') }} (octal)"
+      message: "The PDP-11 just halted at PC {{ states('sensor.pidp_11_pc') }} (octal)"
 ```
 
 ---
@@ -324,8 +334,11 @@ custom_components/pidp11/www/pidp11-panel-card.js  ← the card (vanilla JS)
 custom_components/pidp11/__init__.py               ← serves the file + calls add_extra_js_url()
 ```
 
-The card is **zero-dependency vanilla JS** (no npm, no webpack, no Lit import).
-It extends `HTMLElement` directly, attaches a shadow root, and rebuilds `innerHTML`
+The card is **zero-dependency vanilla JS** (no npm, no webpack, no Lit import at runtime).
+It is a real custom element (`class PiDP11PanelCard extends HTMLElement`, constructor calls
+`super()`): Lovelace creates cards with `document.createElement`, and a constructor function
+that never runs the `HTMLElement` constructor renders nothing. It subscribes to `pidp11_lamps`
+when connected to the page and releases the subscription on disconnect. It attaches a shadow root and rebuilds `innerHTML`
 on every `hass` set (every 5 s coordinator tick). At this update rate that is
 completely fine — no diffing needed.
 
@@ -350,6 +363,15 @@ The fast path (`_updateLeds`) only patches `.adr` and `.dat` LED class lists via
 `querySelectorAll` + `requestAnimationFrame` — no full DOM rebuild. The 5 s coordinator
 tick handles everything else (status LEDs, CPU mode, system name, SR switches).
 
+### Testing the card
+
+`tests/integration/test_card_element.py` and `tests/integration/test_card_entities.py` run
+`tests/card/check-card.mjs` and `check-entities.mjs` under Node with jsdom (no browser). They
+create the element with `document.createElement` as Home Assistant does and check
+`setConfig`, `hass`, rendering, entity resolution and the lamp subscription lifecycle. Install
+the harness once with `cd tests/card && npm ci`; the tests skip when Node or jsdom is missing.
+`node_modules/` is git-ignored.
+
 ### Adding the card to HACS as a Lovelace plugin
 
 When the card matures enough to list separately, register the repo in HACS as a
@@ -358,6 +380,8 @@ When the card matures enough to list separately, register the repo in HACS as a
 is already at the root-accessible path the HACS plugin installer expects.
 
 ---
+
+Terms used here are defined in [docs/glossary.md](docs/glossary.md).
 
 ## Upstream projects
 
@@ -391,8 +415,9 @@ Working end-to-end on Pi 5 + HAOS + PiDP-11 hat as of June 2026:
 - ✅ HALT/CONTINUE services work; HALT→RUNNING transition in < 3 s
 - ✅ SSH console (port 2211)
 - ✅ Lovelace front panel card — faithful PDP-11/70 panel replica with all elements
-- ✅ SR watch stream: 250 ms push channel for switch change events (port 2225)
-- ✅ Lamp stream: 20 Hz PC/PSW push channel for live LED animation (port 2226)
+- ✅ Lamp stream: 20 Hz PC/PSW push channel for live LED animation, plus 250 ms SR change events with `+sr` (port 2226) — one SimH connection for both
+- ✅ SR-only watch stream kept on port 2225 for older clients
+- ✅ Connection budget: the integration holds at most 2 of SimH's 4 console connections
 - ✅ mDNS auto-discovery: remote HAOS finds the Pi on the LAN automatically
 - ✅ v1.4.0 released (add-on + integration)
 - ⏳ v1.5.0 — tape / paper-tape / disk library service
