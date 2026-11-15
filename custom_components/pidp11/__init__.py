@@ -57,7 +57,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: PiDP11ConfigEntry) -> bo
     # which makes "type: custom:pidp11-panel-card" available in Lovelace.
     if not hass.data.get(_DATA_FRONTEND):
         hass.data[_DATA_FRONTEND] = True
-        hass.http.register_static_path(_CARD_URL, str(_CARD_FILE), cache_headers=False)
+        from homeassistant.components.http import StaticPathConfig
+        await hass.http.async_register_static_paths([
+            StaticPathConfig(_CARD_URL, str(_CARD_FILE), cache_headers=False)
+        ])
         add_extra_js_url(hass, _CARD_URL)
         _LOGGER.debug("Registered Lovelace card at %s", _CARD_URL)
 
