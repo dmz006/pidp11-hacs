@@ -154,7 +154,7 @@ No `--network host` needed without GPIO. Use `-p 2211:22` for port mapping inste
 
 ---
 
-## 4 — Watch it start
+## 6 — Watch it start
 
 ```bash
 docker logs -f pidp11
@@ -177,7 +177,7 @@ the troubleshooting section at the bottom.
 
 ---
 
-## 5 — SSH to the PDP-11 console
+## 7 — SSH to the PDP-11 console
 
 ```bash
 ssh pdp11@localhost -p 2211
@@ -208,7 +208,7 @@ docker run -d ... -e SSH_AUTHORIZED_KEYS="$(cat ~/.ssh/id_ed25519.pub)" ...
 
 ---
 
-## 6 — Day-to-day management
+## 8 — Day-to-day management
 
 ```bash
 # See what's running
@@ -239,7 +239,7 @@ auto-restart until you manually `docker start pidp11` again.
 
 ---
 
-## 7 — Disk images
+## 9 — Disk images
 
 ### What's bundled in the image
 
@@ -306,7 +306,7 @@ docker restart pidp11
 
 ---
 
-## 8 — Boot a different OS with the front-panel switches
+## 10 — Boot a different OS with the front-panel switches
 
 For the complete OS switch table, front panel control sequences (halt, single-step,
 memory examine/deposit, start), and safe shutdown procedures, see the dedicated guide:
@@ -368,7 +368,7 @@ EXIT
 
 ---
 
-## 9 — Update to a newer image
+## 11 — Update to a newer image
 
 ```bash
 docker pull ghcr.io/dmz006/pidp11-addon:latest
@@ -381,12 +381,26 @@ state in the `pidp11-data` named volume — both survive this process.
 
 ---
 
-## 10 — Adding Home Assistant later
+## 12 — Adding Home Assistant later
 
 If you later want HA sensors and the Lovelace front-panel card, install the
-HACS integration from this repo and point it at `127.0.0.1:2223`. The
-container exposes the auth-shim on that port whether or not HA is involved.
-See the main [README](../README.md) for full HA setup steps.
+HACS integration from this repo and restart Home Assistant. When Home Assistant
+runs on the same machine, point it at `127.0.0.1:2223`; when it runs elsewhere,
+use this Pi's IP address and port `2223`. The container exposes the auth-shim on
+that port whether or not HA is involved.
+
+The integration asks for the **shared secret**. Home Assistant on another
+machine cannot read it, so get it on the Pi and paste it into the form:
+
+```bash
+sudo docker exec pidp11 cat /data/remote_console.secret
+```
+
+It is a 64-character hex string made on the first start and kept in the
+`pidp11-data` volume (a copy is in `/opt/pidp11-share/pidp11/`). Both are
+readable by root only. The `pdp11` SSH account cannot show it: its shell is the
+console menu. See the main [README](../README.md) for the full steps and the
+troubleshooting table.
 
 ---
 

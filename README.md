@@ -161,11 +161,54 @@ the GPIO driver has been tested and confirmed working (`/dev/gpiomem0`–`/dev/g
    Settings → Devices & Services → **Add Integration** → *PiDP-11* → enter the Pi's IP,
    port `2223`, and the shared secret manually.
 
-   **To retrieve the secret from the Pi:**
+   **To retrieve the secret from the Pi** (run this on the Pi itself, as a user that may use `sudo`):
    ```sh
-   ssh pdp11@<pi-ip> -p 2211 'cat /data/remote_console.secret'
-   # or read it from the container log on first boot
+   sudo docker exec pidp11 cat /data/remote_console.secret
    ```
+   The secret is a 64-character hex string generated on the first start. The same value is
+   copied to `/opt/pidp11-share/pidp11/remote_console.secret` (the container's `/share`).
+   Both files are readable by root only. Do **not** use `ssh pdp11@<pi-ip> -p 2211 'cat ...'`:
+   that account's shell is the PDP-11 console menu, it does not run your command and it could
+   not read a root-only file anyway.
+
+### Adding the device in Home Assistant
+
+1. Install the **PiDP-11** integration through HACS and **restart Home Assistant**. The
+   integration only appears under *Add Integration* after the restart.
+2. Settings → Devices & Services → **Add Integration** → *PiDP-11* (or click **Configure** on the
+   "New device found" notice that mDNS discovery shows).
+3. Fill in the three fields:
+   - **Host** — `127.0.0.1` when the add-on runs on the same machine as Home Assistant (Topology A),
+     otherwise the Pi's IP address (Topology B).
+   - **Port** — `2223`.
+   - **Shared secret** — Topology A fills it in for you from `/share/pidp11/remote_console.secret`.
+     In Topology B Home Assistant cannot read the Pi's files, so paste the value you retrieved
+     with the command above.
+4. Submit. The integration opens the port and sends `AUTH <secret>`; on success it creates the
+   device and registers the front-panel card.
+
+The Lovelace card (`custom:pidp11-panel-card`) is registered only after the integration has been
+set up, so add the device first and then add the card.
+
+### Troubleshooting
+
+| Message | Meaning | Fix |
+|---------|---------|-----|
+| **Shared secret rejected** (`invalid_auth`) | The add-on was reached and answered `DENY bad-auth`, so host and port are right and the secret is wrong. | Re-read the secret on the Pi with `sudo docker exec pidp11 cat /data/remote_console.secret` and paste it without spaces or a trailing newline. A secret from an old install no longer matches if the data volume was recreated. |
+| **Cannot connect** (`cannot_connect`) | Nothing answered on the host and port. | Check the container is running (`sudo docker ps`), the port is `2223`, and the host's firewall or a different subnet is not blocking it from Home Assistant. |
+| **Custom element doesn't exist: pidp11-panel-card** | The card script is registered when the integration is set up, and it is not. | Add the device first (above), restart Home Assistant after a HACS install or update, then reload the browser tab. |
+
+Check the secret from any machine that can reach the Pi, without printing it:
+
+```sh
+python3 - <<'PY'
+import socket, getpass
+secret = getpass.getpass("secret: ")
+c = socket.create_connection(("<pi-ip>", 2223), 5)
+c.sendall(f"AUTH {secret}\n".encode())
+print(c.recv(100))   # b'OK\n' = accepted, b'DENY bad-auth\n' = wrong secret
+PY
+```
 
 ### SSH to the PDP-11 console
 
