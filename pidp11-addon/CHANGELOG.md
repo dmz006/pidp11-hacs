@@ -5,7 +5,7 @@ All notable changes to the `pidp11-addon` container. Format:
 [SemVer](https://semver.org/spec/v2.0.0.html), kept in lockstep with
 the HACS integration version (see AGENT.md §7).
 
-## [Unreleased]
+## [1.4.3] - 2026-11-15
 
 ### Fixed
 - Auth shim leaked SimH console connections when a client vanished; it now closes them in a
@@ -26,7 +26,7 @@ the HACS integration version (see AGENT.md §7).
   to `EVENT lamps` if the GPIO device cannot be opened. See docs/contracts/remote-console.md.
 - Env vars `IDLE_TIMEOUT` (3600) and `HEARTBEAT_INTERVAL` (15).
 
-## [1.4.3] - 2026-11-15
+## [1.4.3] - 2026-11-15 (earlier changes in this release)
 
 ### Changed
 - Version bump in lockstep with the integration (no add-on code change). The documentation

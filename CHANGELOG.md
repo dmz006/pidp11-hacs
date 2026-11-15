@@ -4,7 +4,7 @@ Top-level project changelog. See `pidp11-addon/CHANGELOG.md` for the
 add-on's own log. Both follow SemVer and stay in lockstep per
 AGENT.md §7.
 
-## [Unreleased]
+## [1.4.3] - 2026-11-15
 
 ### Added
 - Options flow (Settings → Devices & services → PiDP-11 → Configure): poll interval, 1 to 60 s
@@ -48,7 +48,7 @@ AGENT.md §7.
 - Entity ids in the README: `sensor.pidp_11_switch_register`, `binary_sensor.pidp_11_cpu_halted`.
 - Tests: Node/jsdom card tests under `tests/card` (`npm ci`).
 
-## [1.4.3] - 2026-11-15
+## [1.4.3] - 2026-11-15 (earlier changes in this release)
 
 ### Fixed
 - A shared secret pasted with a leading or trailing space or newline was rejected as
