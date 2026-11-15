@@ -104,12 +104,16 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
         # Only fire from poll if watch task isn't active (legacy/fallback mode),
         # to avoid duplicate events when the watch stream is running.
         new_sr = state.sr
-        if new_sr is not None and self._prev_sr is not None and new_sr != self._prev_sr:
-            if self._watch_task is None or self._watch_task.done():
-                self.hass.bus.async_fire(
-                    EVENT_SR_CHANGED,
-                    {"sr_old": self._prev_sr, "sr_new": new_sr},
-                )
+        if (
+            new_sr is not None
+            and self._prev_sr is not None
+            and new_sr != self._prev_sr
+            and (self._watch_task is None or self._watch_task.done())
+        ):
+            self.hass.bus.async_fire(
+                EVENT_SR_CHANGED,
+                {"sr_old": self._prev_sr, "sr_new": new_sr},
+            )
         if new_sr is not None:
             self._prev_sr = new_sr
 
@@ -154,7 +158,7 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
                 reader.readuntil(_PROMPT), timeout=_CMD_TIMEOUT
             )
             buf.extend(initial)
-        except (asyncio.TimeoutError, asyncio.IncompleteReadError):
+        except (TimeoutError, asyncio.IncompleteReadError):
             pass
         # Step 2: drain remaining history (0 bytes on a fresh session).
         while True:
@@ -163,7 +167,7 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
                 if not chunk:
                     break
                 buf.extend(chunk)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 break
         return bytes(buf)
 
@@ -408,7 +412,8 @@ def _parse_cpu_mode(psw: str | None) -> str | None:
 
 def _read_current_system() -> str | None:
     try:
-        val = open(CURRENT_SYSTEM_PATH).read().strip()
+        with open(CURRENT_SYSTEM_PATH) as fh:
+            val = fh.read().strip()
         return val or None
     except OSError:
         return None

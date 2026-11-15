@@ -54,7 +54,7 @@ async def _drain_simh_banner(reader: asyncio.StreamReader) -> None:
     """Read until sim> prompt, then drain until quiet."""
     try:
         await asyncio.wait_for(reader.readuntil(_PROMPT), timeout=_CONNECT_TIMEOUT)
-    except (asyncio.TimeoutError, asyncio.IncompleteReadError):
+    except (TimeoutError, asyncio.IncompleteReadError):
         pass
     # Drain remaining buffered data until quiet
     while True:
@@ -62,7 +62,7 @@ async def _drain_simh_banner(reader: asyncio.StreamReader) -> None:
             chunk = await asyncio.wait_for(reader.read(4096), timeout=_DRAIN_QUIET)
             if not chunk:
                 break
-        except asyncio.TimeoutError:
+        except TimeoutError:
             break
 
 
@@ -76,7 +76,7 @@ async def _poll_register(
     await simh_w.drain()
     try:
         raw = await asyncio.wait_for(simh_r.readuntil(_PROMPT), timeout=_CONNECT_TIMEOUT)
-    except (asyncio.TimeoutError, asyncio.IncompleteReadError):
+    except (TimeoutError, asyncio.IncompleteReadError):
         return None
     text = raw[: -len(_PROMPT)].decode(errors="replace")
     return _parse_sr(text)
@@ -97,7 +97,7 @@ async def _handle_watch(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
     try:
         try:
             raw = await asyncio.wait_for(reader.readline(), timeout=AUTH_TIMEOUT)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             writer.write(b"DENY auth-timeout\n")
             await writer.drain()
             return
@@ -116,7 +116,7 @@ async def _handle_watch(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 asyncio.open_connection("127.0.0.1", SIMH_PORT),
                 timeout=_CONNECT_TIMEOUT,
             )
-        except (ConnectionRefusedError, asyncio.TimeoutError):
+        except (TimeoutError, ConnectionRefusedError):
             # SimH not available — close silently
             return
 
@@ -139,7 +139,7 @@ async def _handle_watch(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                     raw_resp = await asyncio.wait_for(
                         simh_r.readuntil(_PROMPT), timeout=_CONNECT_TIMEOUT
                     )
-                except (asyncio.TimeoutError, asyncio.IncompleteReadError):
+                except (TimeoutError, asyncio.IncompleteReadError):
                     break
 
                 text = raw_resp[: -len(_PROMPT)].decode(errors="replace")
@@ -189,7 +189,7 @@ async def _handle_lamp_stream(
     try:
         try:
             raw = await asyncio.wait_for(reader.readline(), timeout=AUTH_TIMEOUT)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             writer.write(b"DENY auth-timeout\n")
             await writer.drain()
             return
@@ -208,7 +208,7 @@ async def _handle_lamp_stream(
                 asyncio.open_connection("127.0.0.1", SIMH_PORT),
                 timeout=_CONNECT_TIMEOUT,
             )
-        except (ConnectionRefusedError, asyncio.TimeoutError):
+        except (TimeoutError, ConnectionRefusedError):
             return
 
         try:
@@ -279,7 +279,7 @@ async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) ->
     try:
         try:
             raw = await asyncio.wait_for(reader.readline(), timeout=AUTH_TIMEOUT)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             writer.write(b"DENY auth-timeout\n")
             await writer.drain()
             return

@@ -15,7 +15,7 @@ import pytest
 # pytest-homeassistant-custom-component enables pytest-socket which blocks
 # raw TCP by default. These tests start real asyncio TCP servers on loopback
 # so we opt in to socket access at the module level.
-pytestmark = [pytest.mark.enable_socket]
+pytestmark = [pytest.mark.usefixtures("socket_enabled")]
 
 # Make the add-on directory importable.
 _ADDON_DIR = Path(__file__).resolve().parent.parent.parent / "pidp11-addon"
@@ -45,7 +45,7 @@ async def _start_mock_simh(
         while True:
             try:
                 line = await asyncio.wait_for(reader.readline(), timeout=5.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 break
             if not line:
                 break
@@ -80,7 +80,7 @@ async def _start_mock_simh_multi(
         while True:
             try:
                 line = await asyncio.wait_for(reader.readline(), timeout=5.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 break
             if not line:
                 break

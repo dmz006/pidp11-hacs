@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-import voluptuous as vol
 
+import voluptuous as vol
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse

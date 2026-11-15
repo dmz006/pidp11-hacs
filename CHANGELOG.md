@@ -6,6 +6,17 @@ AGENT.md §7.
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-11-14
+
+### Fixed
+- Add-on: authshim watchdog restarts a stalled lamp stream; Docker
+  `HEALTHCHECK` added so Supervisor restarts an unhealthy add-on
+  (lamp stream stability).
+- Custom component: Lovelace card registration uses `async_register_static_paths` (the sync `register_static_path` was removed in HA core).
+- CI: authshim loopback-socket tests use the `socket_enabled` fixture
+  (the `enable_socket` marker no longer overrides the HA socket guard);
+  ruff clean, so the GHCR publish job can run again.
+
 ### Added
 - Initial scaffolding (S0): AGENT.md, docs, diagrams, sprint plans,
   skeleton Python module in `custom_components/pidp11/`, skeleton

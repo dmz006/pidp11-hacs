@@ -61,3 +61,9 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 no_implicit_reexport = true
 strict_equality = true
+
+[tool.ruff.lint.per-file-ignores]
+# Long-running daemons / coordinators deliberately swallow errors so a flaky
+# TCP link to SIMH never kills the stream or the HA entity.
+"pidp11-addon/*.py" = ["BLE001", "S110", "EXE001"]
+"custom_components/pidp11/*.py" = ["BLE001", "S110"]
