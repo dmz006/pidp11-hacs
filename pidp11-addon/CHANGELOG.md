@@ -12,8 +12,8 @@ the HACS integration version (see AGENT.md §7).
 ### Fixed
 - Config flow failed to load ("Invalid handler specified") on current HA:
   `ZeroconfServiceInfo` is now imported from
-  `homeassistant.helpers.service_info.zeroconf`.
-- Minimum Home Assistant version raised to 2025.1.0 (`hacs.json`).
+  `homeassistant.helpers.service_info.zeroconf`, falling back to the old
+  location on older HA.
 
 ## [1.4.1] - 2026-11-14
 

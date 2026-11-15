@@ -8,7 +8,6 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
-from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 
 from .const import (
     CONF_HOST,
@@ -19,6 +18,11 @@ from .const import (
     DOMAIN,
     SHARED_SECRET_PATH,
 )
+
+try:  # HA >= 2025.2 moved the class; the old location was later removed.
+    from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
+except ImportError:  # pragma: no cover - older HA
+    from homeassistant.components.zeroconf import ZeroconfServiceInfo
 
 _LOGGER = logging.getLogger(__name__)
 
