@@ -20,6 +20,10 @@ the HACS integration version (see AGENT.md §7).
 
 ### Added
 - `AUTH <secret> +sr` on the lamp port (2226) also streams `EVENT sr value=<octal>`.
+- `AUTH <secret> +lamps [fps=N]` on the lamp port (2226) streams `LAMPS2 {"seq", "leds"}` lines:
+  front-panel lamp percentages sampled read-only from the Pi's GPIO (`gpio_lamps.py`), so they
+  work while the CPU runs. One sampler is shared by all such clients, at 5 to 20 fps. Falls back
+  to `EVENT lamps` if the GPIO device cannot be opened. See docs/contracts/remote-console.md.
 - Env vars `IDLE_TIMEOUT` (3600) and `HEARTBEAT_INTERVAL` (15).
 
 ## [1.4.3] - 2026-11-15

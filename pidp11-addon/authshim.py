@@ -23,15 +23,30 @@ stream handlers watch the client side for EOF instead of waiting for a write to
 fail (they only write when a register changes, which on a quiet machine is
 never), and the proxy closes sessions that have been idle for IDLE_TIMEOUT.
 
+A client on the lamp port that sends ``AUTH <secret> +lamps`` (optionally with
+``fps=N``) gets ``LAMPS2 <json>`` lines instead: front-panel lamp percentages
+sampled from the Pi's GPIO by gpio_lamps.py, shared by every such client. Those
+clients hold no SimH connection unless they also send ``+sr``. If the GPIO
+device cannot be opened the shim serves the ``EVENT lamps`` stream as before.
+
 Wire protocol is documented in docs/contracts/remote-console.md.
 """
 import asyncio
 import hmac
+import json
 import os
 import re
 import socket
 import sys
 from collections.abc import Awaitable, Callable
+
+from gpio_lamps import (
+    LampFeedFailed,
+    LampUnavailable,
+    SharedLampFeed,
+    clamp_fps,
+    lamps_changed,
+)
 
 LISTEN_PORT = int(os.environ.get("AUTHSHIM_PORT", "2223"))
 SIMH_PORT   = int(os.environ.get("SIMH_PORT",     "2224"))
@@ -60,6 +75,15 @@ IDLE_TIMEOUT = float(os.environ.get("IDLE_TIMEOUT", "3600"))
 HEARTBEAT_INTERVAL = float(os.environ.get("HEARTBEAT_INTERVAL", "15"))
 
 _FLAG_SR = "+sr"
+# `AUTH <secret> +lamps [fps=N]` on the lamp port asks for sampled LAMPS2 lines.
+_FLAG_LAMPS = "+lamps"
+# A LAMPS2 client is sent its current lamp frame at least this often.
+LAMPS_KEEPALIVE_S = 2.0
+# How long a LAMPS2 stream waits for a new frame before it looks at the client
+# again (so a vanished client is noticed) and polls SR when that is due.
+_LAMPS_POLL_S = 0.25
+# One sampler for all LAMPS2 clients; it runs only while a client is subscribed.
+_lamp_feed = SharedLampFeed()
 # `AUTH <secret> +system` on the main port asks for the current system name.
 # The shim answers `SYSTEM <name>` and closes, without opening a SimH connection.
 _FLAG_SYSTEM = "+system"
@@ -154,9 +178,9 @@ async def _authenticate(
 ) -> frozenset[str] | None:
     """Read and check the AUTH line.
 
-    Returns the set of ``+flag`` options the client asked for (usually empty), or
-    None after answering DENY. ``AUTH <secret>`` is the whole protocol for old
-    clients; flags follow the secret after a space.
+    Returns the ``+flag`` options and ``fps=N`` tokens the client asked for
+    (usually empty), or None after answering DENY. ``AUTH <secret>`` is the whole
+    protocol for old clients; flags follow the secret after a space.
     """
     try:
         raw = await asyncio.wait_for(reader.readline(), timeout=AUTH_TIMEOUT)
@@ -174,7 +198,7 @@ async def _authenticate(
         n = len(secret)
         if rest[n : n + 1] == b" " and hmac.compare_digest(rest[:n], secret):
             flags = rest[n + 1 :].decode(errors="replace").split()
-            return frozenset(w for w in flags if w.startswith("+"))
+            return frozenset(w for w in flags if w.startswith(("+", "fps=")))
     writer.write(b"DENY bad-auth\n")
     await writer.drain()
     return None
@@ -229,12 +253,96 @@ _Step = Callable[[], Awaitable[list[bytes] | None]]
 _StepFactory = Callable[[asyncio.StreamReader, asyncio.StreamWriter, frozenset[str]], _Step]
 
 
+def _requested_fps(flags: frozenset[str]) -> int | None:
+    """The ``fps=N`` a client asked for, clamped; None when absent or not a number."""
+    for word in sorted(flags):
+        if word.startswith("fps="):
+            try:
+                return clamp_fps(int(word[len("fps="):]))
+            except ValueError:
+                return None
+    return None
+
+
+async def _lamps2_body(
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    flags: frozenset[str],
+    feed: SharedLampFeed,
+) -> None:
+    """Send ``LAMPS2`` lines from the shared sampler until the client leaves.
+
+    A line goes out when a lamp moved by two points or more since the last line
+    sent on this connection, and at least every LAMPS_KEEPALIVE_S seconds (the
+    keepalive repeats the current frame). ``seq`` counts the lines sent on this
+    connection. With ``+sr`` the stream also polls SR on the watch cadence, over
+    a SimH connection this stream owns and closes.
+    """
+    loop = asyncio.get_running_loop()
+    simh_r: asyncio.StreamReader | None = None
+    simh_w: asyncio.StreamWriter | None = None
+    try:
+        if _FLAG_SR in flags:
+            simh_r, simh_w = await _open_simh()
+            banner = await _drain_simh_banner(simh_r)
+            if _BUSY in banner:
+                print(
+                    "[authshim] lamp stream from "
+                    f"{writer.get_extra_info('peername')}: SimH has no free remote connection",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return
+
+        seen = 0
+        sent = 0
+        last_sent: dict[str, int] | None = None
+        last_sent_at: float | None = None
+        sr_prev: str | None = None
+        sr_due = 0.0
+        while not _client_gone(reader, writer):
+            now = loop.time()
+            if simh_r is not None and simh_w is not None and now >= sr_due:
+                sr = await _poll_register(simh_r, simh_w, "EXAMINE SR")
+                sr_due = now + WATCH_INTERVAL_MS / 1000.0
+                if sr is not None and sr != sr_prev:
+                    sr_prev = sr
+                    writer.write(f"EVENT sr value={sr}\n".encode())
+                    await asyncio.wait_for(writer.drain(), timeout=_WRITE_TIMEOUT)
+
+            try:
+                got = await feed.next_frame(seen, _LAMPS_POLL_S)
+            except LampFeedFailed:
+                return
+            now = loop.time()
+
+            out: dict[str, int] | None = None
+            if got is not None:
+                seen, frame = got
+                if last_sent_at is None or lamps_changed(last_sent, frame):
+                    out = frame
+            if out is None and last_sent_at is not None and now - last_sent_at >= LAMPS_KEEPALIVE_S:
+                latest = feed.latest()
+                out = latest[1] if latest is not None else None
+            if out is not None:
+                sent += 1
+                last_sent = out
+                last_sent_at = now
+                body = json.dumps({"seq": sent, "leds": out}, sort_keys=True, separators=(",", ":"))
+                writer.write(f"LAMPS2 {body}\n".encode())
+                await asyncio.wait_for(writer.drain(), timeout=_WRITE_TIMEOUT)
+    finally:
+        await _close(simh_w)
+
+
 async def _stream_session(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
     label: str,
     interval_s: float,
     make_step: _StepFactory,
+    *,
+    lamps: bool = False,
 ) -> None:
     """Common life cycle of a watch or lamp stream.
 
@@ -245,17 +353,37 @@ async def _stream_session(
        heartbeat when quiet
     5. Ends when the client goes away (EOF, reset, write failure) or SimH does;
        the SimH connection is always closed on the way out
+
+    With ``lamps`` and a ``+lamps`` flag, step 3 is replaced by the shared GPIO
+    sampler (``_lamps2_body``) when the sampler opens; otherwise the stream is
+    the ``EVENT`` stream above.
     """
     peer = writer.get_extra_info("peername")
     simh_w: asyncio.StreamWriter | None = None
+    feed = _lamp_feed
+    token: object | None = None
     try:
         _enable_keepalive(writer)
         flags = await _authenticate(reader, writer)
         if flags is None:
             return
 
+        if lamps and _FLAG_LAMPS in flags:
+            try:
+                token = await feed.subscribe(_requested_fps(flags))
+            except LampUnavailable as exc:
+                print(
+                    f"[authshim] {label} sampler unavailable, serving EVENT lamps: {exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+
         writer.write(b"OK\n")
         await writer.drain()
+
+        if token is not None:
+            await _lamps2_body(reader, writer, flags, feed)
+            return
 
         try:
             simh_r, simh_w = await _open_simh()
@@ -296,6 +424,8 @@ async def _stream_session(
     except Exception as exc:
         print(f"[authshim] {label} error from {peer}: {exc}", file=sys.stderr, flush=True)
     finally:
+        if token is not None:
+            feed.unsubscribe(token)
         await _close(simh_w)
         await _close(writer)
 
@@ -370,7 +500,9 @@ async def _handle_lamp_stream(
     Streams ``EVENT lamps ADDRESS=<pc> DATA=<psw>`` on change, and with the
     ``+sr`` flag also ``EVENT sr value=<octal>`` on change.
     """
-    await _stream_session(reader, writer, "lamp", LAMP_INTERVAL_MS / 1000.0, _lamp_step)
+    await _stream_session(
+        reader, writer, "lamp", LAMP_INTERVAL_MS / 1000.0, _lamp_step, lamps=True
+    )
 
 
 # ── Plain proxy ───────────────────────────────────────────────────────────────

@@ -102,6 +102,71 @@ A client that sends `AUTH <secret> +sr\n` also receives
 and on change), so a single connection carries everything the integration needs.
 A client that sends plain `AUTH <secret>\n` gets lamps only.
 
+### Sampled lamps: `LAMPS2` (port + 3, default 2226)
+
+The `EVENT lamps` stream above is built from `EXAMINE PC` and `EXAMINE PSW` and
+so is only meaningful while the CPU is halted or stepping. The add-on can also
+read the front-panel lamps straight from the Pi's GPIO, which works while the
+CPU runs. It uses the same port and does not touch SimH.
+
+Handshake:
+
+```
+AUTH <secret> +lamps\n
+AUTH <secret> +lamps fps=<N>\n
+AUTH <secret> +lamps +sr fps=10\n
+```
+
+`fps=N` is the frame rate this client asks for. It is clamped to 5..20; a value
+that is not a number is ignored. With no `fps` token the rate is the add-on's
+`LAMP_FPS` setting (default 10). Server responds `OK\n` as for any stream.
+
+After `OK`, lines of this form:
+
+```
+LAMPS2 {"leds":{"ADDRESS0":100,"DATA15":0,"USER":100,...},"seq":1}\n
+```
+
+- `leds` maps a lamp name to its percentage of time lit, an integer from 0 to
+  100. Names are the front-panel daemon's own (`ADDRESS0`..`ADDRESS21`,
+  `DATA0`..`DATA15`, `RUN`, `PAUSE`, `PARITY_HIGH`, and so on). The lamp set is
+  fixed for a given add-on build.
+- `USER`, `SUPER` and `KERNEL` are derived from the MMR0 mode bits: `00` is
+  KERNEL, `01` is SUPER and `11` is USER. The raw `MMR0_MODE_BIT0`..`BIT2`
+  lamps are also present. The choice of bits is an assumption; see Status below.
+- A line is sent when the first frame arrives, and afterwards only when a lamp
+  has moved by 2 points or more since the last line sent on this connection.
+- A line is also sent at least every 2 seconds (the keepalive). It repeats the
+  current frame with the next `seq`. Clients ignore any line that does not start
+  with `LAMPS2 ` or `EVENT `.
+- `seq` starts at 1 on each connection and goes up by one for every `LAMPS2` line
+  sent on that connection.
+- With `+sr`, the stream also sends `EVENT sr value=<octal>` on change, as
+  described for the lamp stream above.
+
+Sharing and budget:
+
+- All `LAMPS2` clients share one sampler. It runs only while at least one client
+  is connected, at the highest rate any of them asked for, and it is released
+  when the last one leaves.
+- A `LAMPS2` client without `+sr` holds no SimH connection. With `+sr` it holds
+  one, as the lamp stream always has.
+
+Fallback:
+
+- If the add-on cannot open the GPIO device read-only, the shim still answers
+  `OK` and serves the `EVENT lamps` stream as before. `LAMPS2` never appears on
+  that connection, so a client must accept both forms.
+- A client that does not send `+lamps` gets the `EVENT lamps` stream, unchanged.
+
+Status: the sampler reads `/dev/gpiomem0` (the RP1 GPIO window, opened read-only
+and mapped `PROT_READ`). The lamp-to-pin mapping comes from the upstream source.
+Checked on a Pi 5 against a photo of the panel: ADDRESS0..21, DATA0..15, RUN,
+USER (raw `MMR0_MODE_BIT2`), ADDRESSING_16, PARITY_HIGH, ADDR_SEL_CPHY and
+DATA_SEL_FB_LO0. Not yet checked: SUPER and KERNEL (they depend on the low bit of
+the mode code, which is an assumption), the other mode bits, and the remaining
+ADDR_SEL and DATA_SEL bits. Treat those as provisional.
+
 ### Integration behaviour
 
 `PiDP11Coordinator` starts one background task (`_run_stream`) that maintains a
