@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import json
 from pathlib import Path
 
 import voluptuous as vol
@@ -30,6 +31,9 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[str] = ["binary_sensor", "sensor", "switch"]
 
 _CARD_URL = "/pidp11-hacs/pidp11-panel-card.js"
+# The browser keeps a script for its URL; carrying the integration version in the query string makes
+# every update load the new card instead of the cached one ("setConfig is not a function" from an old script).
+_CARD_VERSION = json.loads((Path(__file__).parent / "manifest.json").read_text())["version"]
 _CARD_FILE = Path(__file__).parent / "www" / "pidp11-panel-card.js"
 _DATA_FRONTEND = f"{DOMAIN}_frontend_registered"
 
@@ -68,7 +72,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PiDP11ConfigEntry) -> bo
         await hass.http.async_register_static_paths([
             StaticPathConfig(_CARD_URL, str(_CARD_FILE), cache_headers=False)
         ])
-        add_extra_js_url(hass, _CARD_URL)
+        add_extra_js_url(hass, f"{_CARD_URL}?v={_CARD_VERSION}")
         _LOGGER.debug("Registered Lovelace card at %s", _CARD_URL)
 
     return True
