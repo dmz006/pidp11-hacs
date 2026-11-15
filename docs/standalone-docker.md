@@ -373,7 +373,7 @@ EXIT
 ```bash
 docker pull ghcr.io/dmz006/pidp11-addon:latest
 docker stop pidp11 && docker rm pidp11
-# re-run the docker run command from step 3
+# re-run the docker run command from section 5
 ```
 
 Your disk images live in `/opt/pidp11-share` (bind mount) and your emulator
