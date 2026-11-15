@@ -15,6 +15,16 @@ AGENT.md §7.
   shares one stream for lamps and SR, closes every connection, backs off, and keeps the last
   values while SimH is busy. The auth shim closes a SimH connection when its client goes away,
   times out idle proxied sessions and sends keepalive comments.
+- Home Assistant logged "Detected blocking call to open": the coordinator read
+  `/share/pidp11/current_system` on the event loop. The read now runs in the executor.
+- The System sensor stayed unknown when Home Assistant ran on another machine than the add-on.
+  The integration now asks the add-on (`AUTH <secret> +system` answers `SYSTEM <name>`, see
+  `docs/contracts/remote-console.md`). An add-on that does not answer keeps the sensor unknown,
+  without an error.
+- SimH's remote console (port 2224) stayed down when its bind failed on closed connections from
+  the previous run ("Address already in use"); SimH never retries. The add-on now waits up to
+  90 s for the port to be bindable before starting SimH, and logs an error when SimH is not
+  listening 20 s after it starts.
 
 ### Operator review required
 - Entity ids are `pidp_11_*`, not `pidp11_*`. Check every automation, script, template and

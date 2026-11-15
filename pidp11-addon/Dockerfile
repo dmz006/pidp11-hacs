@@ -95,6 +95,7 @@ COPY systems/ /opt/pidp11/systems/
 COPY getsel.sh              /opt/pidp11/bin/getsel.sh
 COPY authshim.py            /opt/pidp11/bin/authshim.py
 COPY zeroconf_advertise.py  /opt/pidp11/bin/zeroconf_advertise.py
+COPY port_wait.py           /opt/pidp11/bin/port_wait.py
 COPY ssh_console.sh         /opt/pidp11/bin/ssh_console.sh
 COPY run.sh                 /run.sh
 RUN chmod +x /run.sh \

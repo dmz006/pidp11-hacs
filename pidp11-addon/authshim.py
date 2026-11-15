@@ -36,6 +36,8 @@ from collections.abc import Awaitable, Callable
 LISTEN_PORT = int(os.environ.get("AUTHSHIM_PORT", "2223"))
 SIMH_PORT   = int(os.environ.get("SIMH_PORT",     "2224"))
 SECRET_FILE = os.environ.get("SECRET_FILE", "/data/remote_console.secret")
+# Written by run.sh each time a system is booted; read for the SYSTEM answer.
+CURRENT_SYSTEM_FILE = os.environ.get("CURRENT_SYSTEM_FILE", "/share/pidp11/current_system")
 AUTH_TIMEOUT = 5.0
 VERSION = "1.0.0"
 
@@ -58,6 +60,11 @@ IDLE_TIMEOUT = float(os.environ.get("IDLE_TIMEOUT", "3600"))
 HEARTBEAT_INTERVAL = float(os.environ.get("HEARTBEAT_INTERVAL", "15"))
 
 _FLAG_SR = "+sr"
+# `AUTH <secret> +system` on the main port asks for the current system name.
+# The shim answers `SYSTEM <name>` and closes, without opening a SimH connection.
+_FLAG_SYSTEM = "+system"
+_UNKNOWN_SYSTEM = "unknown"
+_SYSTEM_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
 
 
 class _BackendGone(Exception):
@@ -67,6 +74,16 @@ class _BackendGone(Exception):
 def _load_secret() -> str:
     with open(SECRET_FILE) as fh:
         return fh.read().strip()
+
+
+def _read_system_name() -> str:
+    """Name of the system last booted, or "unknown" if missing, empty or odd."""
+    try:
+        with open(CURRENT_SYSTEM_FILE, encoding="utf-8", errors="replace") as fh:
+            name = fh.read().strip()
+    except OSError:
+        return _UNKNOWN_SYSTEM
+    return name if _SYSTEM_NAME_RE.match(name) else _UNKNOWN_SYSTEM
 
 
 def _parse_sr(text: str) -> str | None:
@@ -389,11 +406,19 @@ async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) ->
     simh_w: asyncio.StreamWriter | None = None
     try:
         _enable_keepalive(writer)
-        if await _authenticate(reader, writer) is None:
+        flags = await _authenticate(reader, writer)
+        if flags is None:
             return
 
         writer.write(b"OK\n")
         writer.write(f"# pidp11-authshim {VERSION}\n".encode())
+        if _FLAG_SYSTEM in flags:
+            # Answered here, before any SimH connection: the console has four
+            # slots and the integration's budget is two.
+            name = await asyncio.to_thread(_read_system_name)
+            writer.write(f"SYSTEM {name}\n".encode())
+            await writer.drain()
+            return
         await writer.drain()
 
         try:

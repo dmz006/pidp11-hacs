@@ -6,6 +6,7 @@ import asyncio
 import logging
 import re
 import socket
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import timedelta
@@ -62,6 +63,14 @@ _STREAM_BACKOFF_BASE = 10.0   # seconds before the first stream reconnect; doubl
 _STREAM_BACKOFF_MAX = 120.0
 _STREAM_AUTH_RETRY = 30.0
 _STREAM_AUTH_SR = " +sr"      # ask the shim for SR events on the lamp stream too
+# When /share/pidp11/current_system is not on this machine, ask the add-on's
+# shim on the main port: `AUTH <secret> +system` answers `SYSTEM <name>`. An
+# add-on that does not answer that way is not asked again for a while.
+_SYSTEM_FLAG = "+system"
+_SYSTEM_QUERY_TIMEOUT = 2.0
+_SYSTEM_QUERY_LINES = 4        # OK, version line, then the SYSTEM answer (slack for one more)
+_SYSTEM_QUERY_RETRY = 300.0
+_UNKNOWN_SYSTEM = "unknown"
 
 
 class PiDP11Busy(UpdateFailed):
@@ -109,6 +118,7 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
         # At most one transient connection (poll or command) at a time.
         self._conn_lock = asyncio.Lock()
         self._busy_logged = False
+        self._system_query_after = 0.0  # monotonic time before which we do not ask again
 
     # ── Public command API ────────────────────────────────────────────────────
 
@@ -127,9 +137,12 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
     # ── DataUpdateCoordinator hook ────────────────────────────────────────────
 
     async def _async_update_data(self) -> PiDP11State:
-        system = _read_current_system()
+        # The file read blocks; run it in the executor, never on the event loop.
+        system = await self.hass.async_add_executor_job(_read_current_system)
         try:
             async with self._conn_lock:
+                if system is None:
+                    system = await self._system_from_add_on()
                 state = await self._with_busy_retry(lambda: self._timed_poll(system))
         except PiDP11Busy as exc:
             return self._keep_last_values(system, exc)
@@ -172,6 +185,55 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
         else:
             _LOGGER.debug("%s; still keeping the last values", exc)
         return replace(self.data, system=system)
+
+    async def _system_from_add_on(self) -> str | None:
+        """Name of the booted system as the add-on reports it, or None.
+
+        Called under _conn_lock. The query opens no SimH connection (the shim
+        answers it itself). An add-on that gives no SYSTEM answer keeps the
+        sensor unknown and is not asked again for _SYSTEM_QUERY_RETRY seconds.
+        """
+        if time.monotonic() < self._system_query_after:
+            return None
+        answer = await self._query_system()
+        if answer is None:
+            self._system_query_after = time.monotonic() + _SYSTEM_QUERY_RETRY
+            _LOGGER.debug("Add-on gave no system name; not asking again for a while")
+            return None
+        return None if answer == _UNKNOWN_SYSTEM else answer
+
+    async def _query_system(self) -> str | None:
+        """One short connection: AUTH with +system, read the SYSTEM line.
+
+        Returns the name the add-on reports ("unknown" included), or None when
+        it gave no such answer: an older add-on, an unreachable one, or a
+        refused secret. Never raises; the socket is closed in every case.
+        """
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(self.host, self.port),
+                timeout=_CONNECT_TIMEOUT,
+            )
+        except (TimeoutError, OSError):
+            return None
+        try:
+            writer.write(f"AUTH {self._secret} {_SYSTEM_FLAG}\n".encode())
+            await writer.drain()
+            async with asyncio.timeout(_SYSTEM_QUERY_TIMEOUT):
+                for _ in range(_SYSTEM_QUERY_LINES):
+                    line = await reader.readline()
+                    if not line:
+                        return None
+                    text = line.decode(errors="replace").strip()
+                    if text.startswith("SYSTEM "):
+                        return text[len("SYSTEM "):].strip() or _UNKNOWN_SYSTEM
+                    if text.startswith("DENY"):
+                        return None
+            return None
+        except (TimeoutError, OSError):
+            return None
+        finally:
+            await _release(reader, writer)
 
     def _stream_carries_sr(self) -> bool:
         task = self._stream_task

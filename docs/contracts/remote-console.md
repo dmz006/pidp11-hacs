@@ -138,6 +138,42 @@ The integration holds at most 2 connections: the one stream plus one transient
 connection (a poll or a command, never two at once). When SimH is busy a poll
 retries 3 times with doubling backoff (1 s, 2 s, 4 s; `_BUSY_BACKOFF_MAX` caps a single wait at 8 s, unreached with `_BUSY_RETRIES = 3`) and then keeps the last values.
 
+## System name (port 2223)
+
+The integration's System sensor shows the system SimH booted. It reads
+`/share/pidp11/current_system` when that file is on its own machine. When it is
+not (Home Assistant on another host than the add-on), it asks the add-on on the
+main port:
+
+```
+AUTH <secret> +system\n
+```
+
+The shim answers as for any `AUTH` and then sends one line and closes:
+
+```
+OK\n
+# pidp11-authshim <semver>\n
+SYSTEM <name>\n
+```
+
+- `<name>` is the content of the add-on's `/share/pidp11/current_system`. It is
+  `unknown` when that file is missing or empty, or when the content is not
+  1 to 32 characters from `A-Z a-z 0-9 . _ -`.
+- The shim answers before it opens a SimH connection, so the query takes no
+  console slot and does not touch SimH.
+- The query is a flag on `AUTH`, not a bare `SYSTEM` line sent after it. On this
+  port the shim forwards the client's bytes to SimH and clients wait for SimH's
+  banner first, so a line the shim had to read before opening SimH would stall
+  every poll.
+- A wrong secret gets `DENY bad-auth` and no `SYSTEM` line.
+- An add-on from before this query does not answer it: it proxies the
+  connection to SimH and sends no `SYSTEM` line. The integration reads at most
+  four lines, then closes the connection. The sensor stays unknown with no
+  error, and the integration does not ask again for 5 minutes.
+- The integration asks only when its local file is missing or empty. An
+  `unknown` answer is asked again on every poll.
+
 ## Re-connection
 
 If the TCP connection drops, the integration's coordinator reopens with
@@ -165,3 +201,6 @@ major version.
   shim against a built image.
 - Both suites share the same transcript fixtures so drift on either side
   is caught.
+- The system-name query is covered by `tests/integration/test_system_query.py`
+  (fake add-on, real shim handler) and the run.sh port wait by
+  `tests/addon/test_port_wait.py`.

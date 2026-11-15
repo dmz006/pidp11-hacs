@@ -10,6 +10,13 @@ the HACS integration version (see AGENT.md §7).
 ### Fixed
 - Auth shim leaked SimH console connections when a client vanished; it now closes them in a
   `finally`, detects client EOF on streams, enforces `IDLE_TIMEOUT` and sends keepalives.
+- SimH's remote console (port 2224) stayed down after "bind error 98 / Can't open network port":
+  `run.sh` waits up to 90 s (`port_wait.py bindable`) for 127.0.0.1:2224 to be bindable before
+  starting SimH, and logs `ERROR: SimH remote console not listening on 2224` if it is not
+  listening 20 s after start.
+- `AUTH <secret> +system` on port 2223 is answered `SYSTEM <name>` from
+  `/share/pidp11/current_system` (or `unknown`), without a SimH connection. Used by the
+  integration when its own copy of the file is missing.
 
 ### Added
 - `AUTH <secret> +sr` on the lamp port (2226) also streams `EVENT sr value=<octal>`.

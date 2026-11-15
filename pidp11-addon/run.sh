@@ -14,6 +14,13 @@ SECRET_FILE="${DATA_DIR}/remote_console.secret"
 SHM_DIR="/dev/shm/pidp11"
 SIMH="${BIN_DIR}/pdp11_realcons"
 SERVER11="${BIN_DIR}/pidp1170_blinkenlightd"
+PORT_WAIT="${BIN_DIR}/port_wait.py"
+# SimH's boot.ini opens `set remote telnet=2224`. SimH binds it once and never
+# retries, so a bind that fails (closed connections of the last run still in
+# TIME_WAIT) leaves the remote console down for the whole run.
+SIMH_REMOTE_PORT=2224
+SIMH_PORT_WAIT_SECONDS=90
+SIMH_LISTEN_WAIT_SECONDS=20
 
 log() { echo "[pidp11] $*"; }
 die() { echo "[pidp11] FATAL: $*" >&2; exit 1; }
@@ -331,8 +338,25 @@ while true; do
     # ── Launch SimH in detached screen session ────────────────────────────────
     # SSH users attach via:  ssh pdp11@<host> -p 2211
     # ssh_console.sh runs:   sudo screen -x pidp11
+    # ── Wait until SimH can bind its remote-console port ─────────────────────
+    _port_start=$(date +%s)
+    if python3 "${PORT_WAIT}" bindable 127.0.0.1 "${SIMH_REMOTE_PORT}" "${SIMH_PORT_WAIT_SECONDS}"; then
+        log "Waited $(( $(date +%s) - _port_start ))s for port ${SIMH_REMOTE_PORT} to be bindable before starting SimH"
+    else
+        log "WARNING: port ${SIMH_REMOTE_PORT} still not bindable after ${SIMH_PORT_WAIT_SECONDS}s (waited $(( $(date +%s) - _port_start ))s) — starting SimH anyway"
+    fi
+
     log "Launching SimH in screen session 'pidp11'"
     screen -dmS pidp11 "${SIMH}" "${SHM_DIR}/tmpsimhcommand.txt"
+
+    # ── Check that SimH is serving its remote console ────────────────────────
+    # Logged, not retried: a SimH that is not listening keeps running, and the
+    # integration shows the failure as unavailable entities.
+    if python3 "${PORT_WAIT}" listening "${SIMH_REMOTE_PORT}" "${SIMH_LISTEN_WAIT_SECONDS}"; then
+        log "SimH remote console listening on ${SIMH_REMOTE_PORT}"
+    else
+        log "ERROR: SimH remote console not listening on ${SIMH_REMOTE_PORT} after ${SIMH_LISTEN_WAIT_SECONDS} s"
+    fi
 
     # 2.11BSD's second-stage bootloader does not auto-boot — it waits at the
     # ':' prompt indefinitely.  Send 'unix<CR>' after a short delay so the OS
