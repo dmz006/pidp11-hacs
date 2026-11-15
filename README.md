@@ -190,6 +190,22 @@ the GPIO driver has been tested and confirmed working (`/dev/gpiomem0`–`/dev/g
 The Lovelace card (`custom:pidp11-panel-card`) is registered only after the integration has been
 set up, so add the device first and then add the card.
 
+### Changing the shared secret later
+
+The add-on reads the secret file on every connection, so a new secret takes effect at once and
+the container does not need a restart.
+
+1. On the Pi, make a new secret and keep both copies in step:
+   ```sh
+   sudo docker exec pidp11 sh -c 'python3 -c "import secrets; print(secrets.token_hex(32))" > /data/remote_console.secret && chmod 600 /data/remote_console.secret && cp /data/remote_console.secret /share/pidp11/remote_console.secret'
+   sudo docker exec pidp11 cat /data/remote_console.secret
+   ```
+2. Tell Home Assistant. From version 1.4.3: Settings → Devices & Services → **PiDP-11** → the
+   three-dot menu → **Reconfigure**, paste the new secret. On an older version, delete the PiDP-11
+   entry and add it again with the new secret.
+
+Until Home Assistant has the new secret, the sensors show the device as offline.
+
 ### Troubleshooting
 
 | Message | Meaning | Fix |
