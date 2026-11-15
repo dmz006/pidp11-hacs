@@ -246,3 +246,15 @@ Boot into `idled` (all SR switches down) so the lamps are active.
 - [Front panel programming step-by-step](http://www.retrocmp.com/attachments/article/146/consoleserialport.blinkenlight_instructions.txt)
 - [idled boot.ini source](https://github.com/obsolescence/pidp11) — in `systems/idled/boot.ini`; the comments
   show PDP-11 addressing modes, programming techniques, and alternate LED patterns
+
+---
+
+## Live lamps in Home Assistant
+
+The add-on reads the physical panel's lamps (the LED matrix on the GPIO header) **read-only** and
+streams them to the integration on port 2226 as `LAMPS2` frames. The Lovelace card draws each lamp
+at its measured brightness, so it matches the panel. The refresh rate (5–20 fps, default 10) and the
+CPU poll interval (1–60 s, default 5) are set under the integration's **Configure** options; see the
+README section "Options: poll interval and lamp refresh rate" and `docs/contracts/remote-console.md`
+for the wire format. Reading the lamps needs the GPIO device, so a standalone container runs with
+`--privileged` as shown in `docs/standalone-docker.md`.
