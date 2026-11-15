@@ -29,6 +29,15 @@ _LOGGER = logging.getLogger(__name__)
 _CONNECT_TIMEOUT = 5.0
 
 
+def _clean(value: str) -> str:
+    """Strip the whitespace a pasted value tends to carry (a trailing newline or space).
+
+    The add-on compares the secret byte for byte, so one stray space makes it answer
+    ``DENY bad-auth`` even though the secret is right.
+    """
+    return value.strip()
+
+
 def _auto_detect_secret() -> str:
     """Try to read the secret from the shared path written by the add-on."""
     try:
@@ -82,9 +91,9 @@ class PiDP11ConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            host = user_input[CONF_HOST]
+            host = _clean(user_input[CONF_HOST])
             port = user_input[CONF_REMOTE_CONSOLE_PORT]
-            secret = user_input[CONF_SHARED_SECRET]
+            secret = _clean(user_input[CONF_SHARED_SECRET])
 
             await self.async_set_unique_id(f"{host}:{port}")
             self._abort_if_unique_id_configured()
@@ -123,7 +132,7 @@ class PiDP11ConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
             description_placeholders={
                 "secret_hint": (
                     "Auto-detected from /share/pidp11/" if auto_secret else
-                    "Find in the add-on log on first boot"
+                    "On the Pi, run: sudo docker exec pidp11 cat /data/remote_console.secret"
                 )
             },
         )
@@ -153,7 +162,7 @@ class PiDP11ConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            secret = user_input[CONF_SHARED_SECRET]
+            secret = _clean(user_input[CONF_SHARED_SECRET])
             error = await _validate_connection(host, port, secret)
             if error:
                 errors["base"] = error
@@ -169,6 +178,33 @@ class PiDP11ConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
 
         return self.async_show_form(
             step_id="zeroconf_confirm",
+            data_schema=vol.Schema({vol.Required(CONF_SHARED_SECRET): str}),
+            errors=errors,
+            description_placeholders={"host": host, "port": str(port)},
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Change the shared secret of an existing device (for example after rotating it)."""
+        entry = self._get_reconfigure_entry()
+        host = entry.data[CONF_HOST]
+        port = entry.data[CONF_REMOTE_CONSOLE_PORT]
+
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            secret = _clean(user_input[CONF_SHARED_SECRET])
+            error = await _validate_connection(host, port, secret)
+            if error:
+                errors["base"] = error
+            else:
+                return self.async_update_reload_and_abort(
+                    entry, data_updates={CONF_SHARED_SECRET: secret}
+                )
+
+        return self.async_show_form(
+            step_id="reconfigure",
             data_schema=vol.Schema({vol.Required(CONF_SHARED_SECRET): str}),
             errors=errors,
             description_placeholders={"host": host, "port": str(port)},

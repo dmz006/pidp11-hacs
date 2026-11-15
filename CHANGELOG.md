@@ -6,6 +6,21 @@ AGENT.md §7.
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-11-15
+
+### Fixed
+- A shared secret pasted with a leading or trailing space or newline was rejected as
+  "Shared secret rejected by the add-on" even when correct. The config flow now strips the value.
+- The setup form and the README gave a command to read the secret that cannot work
+  (`ssh pdp11@<pi> -p 2211 'cat /data/remote_console.secret'`); they now give
+  `sudo docker exec pidp11 cat /data/remote_console.secret`.
+
+### Added
+- Reconfigure step: change the shared secret of an existing device from
+  Settings, Devices & Services, PiDP-11, the three-dot menu, **Reconfigure**.
+- README: step-by-step "Adding the device in Home Assistant", a troubleshooting table and a
+  check that tests the secret without printing it.
+
 ## [1.4.2] - 2026-11-14
 
 ### Fixed

@@ -7,6 +7,12 @@ the HACS integration version (see AGENT.md §7).
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-11-15
+
+### Changed
+- Version bump in lockstep with the integration (no add-on code change). The documentation
+  now says how to read and rotate the remote-console secret.
+
 ## [1.4.2] - 2026-11-14
 
 ### Fixed

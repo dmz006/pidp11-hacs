@@ -3,7 +3,7 @@
     "step": {
       "zeroconf_confirm": {
         "title": "Found PiDP-11",
-        "description": "Found a PiDP-11 emulator at **{host}:{port}**.\n\nEnter the shared secret to complete setup. Retrieve it by running:\n```\nssh pdp11@{host} -p 2211 'cat /data/remote_console.secret'\n```",
+        "description": "Found a PiDP-11 emulator at **{host}:{port}**.\n\nEnter the shared secret to complete setup. Retrieve it on the Pi by running:\n```\nsudo docker exec pidp11 cat /data/remote_console.secret\n```",
         "data": {
           "shared_secret": "Shared secret"
         }
@@ -19,7 +19,14 @@
         "data_description": {
           "host": "IP or hostname of the machine running the PiDP-11 add-on",
           "remote_console_port": "Port mapped to the add-on's authshim (default 2223)",
-          "shared_secret": "Token from /share/pidp11/remote_console.secret or the add-on log"
+          "shared_secret": "64-character secret. On the Pi run: sudo docker exec pidp11 cat /data/remote_console.secret (Topology A fills it in automatically)"
+        }
+      },
+      "reconfigure": {
+        "title": "Change the PiDP-11 shared secret",
+        "description": "Enter the new shared secret for the PiDP-11 at **{host}:{port}**. Get it on the Pi with:\n```\nsudo docker exec pidp11 cat /data/remote_console.secret\n```",
+        "data": {
+          "shared_secret": "Shared secret"
         }
       }
     },
@@ -29,7 +36,8 @@
       "unknown": "Unexpected error."
     },
     "abort": {
-      "already_configured": "This host is already configured."
+      "already_configured": "This host is already configured.",
+      "reconfigure_successful": "The shared secret was updated."
     }
   },
   "entity": {
