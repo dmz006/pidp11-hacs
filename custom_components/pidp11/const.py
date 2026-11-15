@@ -19,7 +19,17 @@ DEFAULT_REMOTE_CONSOLE_PORT: Final = 2223
 SHARED_SECRET_PATH: Final = "/share/pidp11/remote_console.secret"
 CURRENT_SYSTEM_PATH: Final = "/share/pidp11/current_system"
 
-UPDATE_INTERVAL_SECONDS: Final = 5
+# Options (set in the options flow; defaults apply until the user changes them).
+OPT_POLL_INTERVAL: Final = "poll_interval_seconds"
+OPT_LAMP_FPS: Final = "lamp_fps"
+
+POLL_INTERVAL_DEFAULT: Final = 5
+POLL_INTERVAL_MIN: Final = 1
+POLL_INTERVAL_MAX: Final = 60
+
+LAMP_FPS_DEFAULT: Final = 10
+LAMP_FPS_MIN: Final = 5
+LAMP_FPS_MAX: Final = 20
 
 SERVICE_BOOT: Final = "boot"
 SERVICE_HALT: Final = "halt"
@@ -38,6 +48,29 @@ CPU_MODE_USER: Final = "user"
 EVENT_SR_CHANGED: Final = "pidp11_sr_changed"
 EVENT_SWITCH_CHANGED: Final = "pidp11_switch_changed"
 EVENT_LAMPS: Final = "pidp11_lamps"
+# Live lamp feed: one event per LAMPS2 line from the add-on, with percent-on per lamp.
+EVENT_LAMPS2: Final = "pidp11_lamps2"
 
 WATCH_PORT_OFFSET: Final = 2
 LAMP_PORT_OFFSET: Final = 3
+
+
+def _clamp_int(value: object, low: int, high: int, default: int) -> int:
+    """An integer option clamped to [low, high]; anything that is not a number gives the default."""
+    if isinstance(value, bool):
+        return default
+    try:
+        number = int(value)  # type: ignore[call-overload]
+    except (TypeError, ValueError):
+        return default
+    return min(max(number, low), high)
+
+
+def clamp_poll_interval(value: object) -> int:
+    """Poll interval in seconds, 1 to 60."""
+    return _clamp_int(value, POLL_INTERVAL_MIN, POLL_INTERVAL_MAX, POLL_INTERVAL_DEFAULT)
+
+
+def clamp_lamp_fps(value: object) -> int:
+    """Lamp refresh rate in frames per second, 5 to 20."""
+    return _clamp_int(value, LAMP_FPS_MIN, LAMP_FPS_MAX, LAMP_FPS_DEFAULT)

@@ -38,7 +38,7 @@ Or click **Add Card → PiDP-11 Front Panel** in the Lovelace card picker.
 | **STATUS row** (12 LEDs) | CPU state / PSW | PAR ERR, ADRS ERR, RUN (on = running), PAUSE, MASTER; USER/SUPER/KERNEL (lit by CPU mode from PSW bits 15–14); ADDRESSING 16/18/22 (22 lit for PDP-11/70). |
 | **ADDRESS** (22 LEDs) | `EXAMINE PC` — 20 Hz live | Program counter as 22 binary LEDs in groups `[1,3,3,3,3,3,3,3]` (bits 21–0, MSB left). Updates at up to 20 Hz via the lamp push stream on port 2226. |
 | **DATA** (16 LEDs) | `EXAMINE PSW` — 20 Hz live | Processor status word as 16 binary LEDs in 4 groups of 4. Interrupt level in bits 7–5, condition codes in bits 3–0. Same 20 Hz stream as ADDRESS. |
-| **PARITY H/L** | *(no source)* | Always dark — SimH does not expose parity. |
+| **PARITY H/L** | `PARITY_HIGH` / `PARITY_LOW` on the live feed | Lit from the live lamp feed when the add-on sends those lamps; dark otherwise (SimH does not expose parity). |
 | **SR switches** (22) | `binary_sensor.pidp_11_sr0`–`sr21` | Physical SR switch positions, updated via the 250 ms SR events carried on the lamp stream (port 2226, `AUTH <secret> +sr`). Toggle-knob style; knob at top = ON. |
 | **ADDR SELECT** | *(hardcoded)* | Shows PROG PHY active — always, because we EXAMINE PC. |
 | **DATA SELECT** | *(hardcoded)* | Shows DISPLAY REGISTER active — always, because we EXAMINE PSW. |
@@ -284,7 +284,8 @@ is right there. Type `HALT`, then `EXAMINE PC`, then `CONTINUE` — watch the LE
 |-------|---------|------------|
 | `pidp11_sr_changed` | `{ sr_old, sr_new }` | SR register changes (from the stream or 5 s poll) |
 | `pidp11_switch_changed` | `{ switch: "SR<N>", state: bool }` | Individual SR bit edge (from the stream) |
-| `pidp11_lamps` | `{ ADDRESS: "xxxxxx", DATA: "xxxxxx" }` | PC and PSW snapshot (octal), fired up to 20 Hz by the lamp stream; consumed by the Lovelace card for live LED animation |
+| `pidp11_lamps2` | `{ seq: n, leds: { ADDRESS21: 0–100, …, RUN: 0–100, … } }` | Live lamp frame: percent on for each lamp. Fired by the lamp stream at most `lamp_fps` times per second (see [Options](#options-poll-interval-and-lamp-refresh-rate)); drawn by the Lovelace card |
+| `pidp11_lamps` | `{ ADDRESS: "xxxxxx", DATA: "xxxxxx" }` | PC and PSW snapshot (octal) from an add-on that does not send live frames; the card draws it as "approximate" |
 
 Example automation — announce when the PDP-11 halts:
 ```yaml
@@ -297,6 +298,32 @@ action:
     data:
       message: "The PDP-11 just halted at PC {{ states('sensor.pidp_11_pc') }} (octal)"
 ```
+
+### Options: poll interval and lamp refresh rate
+
+Open **Settings → Devices & services → PiDP-11 → Configure**.
+
+| Option | Default | Range | What it sets |
+|--------|---------|-------|--------------|
+| Poll interval (seconds) | 5 | 1–60 | How often the integration reads the CPU state and the registers |
+| Lamp refresh rate (fps) | 10 | 5–20 | How many times per second the front-panel lamps are updated |
+
+**10 fps is the recommended lamp rate.** Lower poll intervals and higher fps cost more load on
+the Pi and on the phone. More than 20 fps is excessive for this panel: the options refuse it, and
+the integration never fires more than the configured rate. Saving the form reloads the
+integration, so the new values apply without restarting Home Assistant.
+
+### The live lamp feed
+
+The add-on's lamp stream sends a `LAMPS2` frame with the percent on of every lamp that exists:
+ADDRESS0–21, DATA0–15, RUN, PAUSE, MASTER, USER, SUPER, KERNEL, DATA_SPACE, ADDRESSING_16/18/22,
+PARITY_HIGH/LOW, PAR_ERR, ADRS_ERR and the selector lamps `ADDR_SEL_<X>` and `DATA_SEL_<X>`. The
+integration turns each frame into a `pidp11_lamps2` event, and the card draws every lamp with
+brightness proportional to its percent.
+
+The card's header shows **live** while frames arrive. With no frame for 5 seconds, or when the
+add-on only sends the older `pidp11_lamps` snapshot, it shows **approximate** and draws the lamps
+from the entity values, as before. An add-on that does not know the live feed keeps working.
 
 ---
 
@@ -337,8 +364,9 @@ custom_components/pidp11/__init__.py               ← serves the file + calls a
 The card is **zero-dependency vanilla JS** (no npm, no webpack, no Lit import at runtime).
 It is a real custom element (`class PiDP11PanelCard extends HTMLElement`, constructor calls
 `super()`): Lovelace creates cards with `document.createElement`, and a constructor function
-that never runs the `HTMLElement` constructor renders nothing. It subscribes to `pidp11_lamps`
-when connected to the page and releases the subscription on disconnect. It attaches a shadow root and rebuilds `innerHTML`
+that never runs the `HTMLElement` constructor renders nothing. It subscribes to `pidp11_lamps2`
+(live frames) and `pidp11_lamps` (older snapshot) when connected to the page and releases both
+subscriptions on disconnect. It attaches a shadow root and rebuilds `innerHTML`
 on every `hass` set (every 5 s coordinator tick). At this update rate that is
 completely fine — no diffing needed.
 
@@ -353,20 +381,22 @@ The card is a **faithful software replica of the physical PDP-11/70 front panel*
 
 - **Status row** — 12 indicator LEDs (PAR ERR, ADRS ERR, RUN, PAUSE, MASTER; USER/SUPER/KERNEL by CPU mode; ADDRESSING 16/18/22)
 - **ADDRESS row** — 22 orange-red LEDs in groups `[1,3,3,3,3,3,3,3]`, dark brick-red segment bar above
-- **DATA row** — 16 orange-red LEDs in 4 groups of 4, PARITY H/L dots (always off), dark purple segment bar above
+- **DATA row** — 16 orange-red LEDs in 4 groups of 4, PARITY H/L dots (from the live lamp feed; off otherwise), dark purple segment bar above
 - **SR switches** — 22 toggle-style switches in alternating light/dark crimson groups, with bit numbers above (21→0)
 - **ADDR SELECT / DATA SELECT** — rotary indicator dot rows (8 + 4 positions) hardcoded to PROG PHY and DISPLAY REGISTER
 - **Footer** — booted OS name + LOAD ADRS / EXAM / DEP / CONT / ENABLE / S INST / START control buttons
 
-**Live animation** is driven by `pidp11_lamps` HA events (up to 20 Hz from port 2226).
-The fast path (`_updateLeds`) only patches `.adr` and `.dat` LED class lists via
-`querySelectorAll` + `requestAnimationFrame` — no full DOM rebuild. The 5 s coordinator
-tick handles everything else (status LEDs, CPU mode, system name, SR switches).
+**Live animation** is driven by `pidp11_lamps2` HA events (live frames, at most the configured
+fps). Each lamp is an element with a `data-lamp` name; its brightness is the `--lv` custom
+property (0 to 1) that a lit overlay reads, so no class list changes per frame. Frames are
+coalesced into one `requestAnimationFrame` paint. A lamp missing from a frame keeps its entity
+value. The header marker switches to "approximate" after 5 s without a frame. The 5 s coordinator
+tick handles the rest (CPU mode, system name, SR switches).
 
 ### Testing the card
 
 `tests/integration/test_card_element.py` and `tests/integration/test_card_entities.py` run
-`tests/card/check-card.mjs` and `check-entities.mjs` under Node with jsdom (no browser). They
+`tests/card/check-card.mjs`, `check-entities.mjs` and `check-lamps.mjs` under Node with jsdom (no browser). They
 create the element with `document.createElement` as Home Assistant does and check
 `setConfig`, `hass`, rendering, entity resolution and the lamp subscription lifecycle. Install
 the harness once with `cd tests/card && npm ci`; the tests skip when Node or jsdom is missing.

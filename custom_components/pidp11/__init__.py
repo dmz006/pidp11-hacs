@@ -18,6 +18,10 @@ from .const import (
     CONF_REMOTE_CONSOLE_PORT,
     CONF_SHARED_SECRET,
     DOMAIN,
+    LAMP_FPS_DEFAULT,
+    OPT_LAMP_FPS,
+    OPT_POLL_INTERVAL,
+    POLL_INTERVAL_DEFAULT,
     SERVICE_BOOT,
     SERVICE_CONTINUE,
     SERVICE_DEPOSIT,
@@ -47,9 +51,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: PiDP11ConfigEntry) -> bo
         host=entry.data[CONF_HOST],
         port=entry.data[CONF_REMOTE_CONSOLE_PORT],
         secret=entry.data[CONF_SHARED_SECRET],
+        poll_interval=entry.options.get(OPT_POLL_INTERVAL, POLL_INTERVAL_DEFAULT),
+        lamp_fps=entry.options.get(OPT_LAMP_FPS, LAMP_FPS_DEFAULT),
     )
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
+    # Options are read when the coordinator is built (poll interval, stream fps), so a
+    # change reloads the entry: the new values apply without restarting Home Assistant.
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     # One long-lived stream carries the lamps and the switch register: together
     # with a poll the integration holds at most 2 of SimH's 4 console connections
     # (boot.ini: `set remote connections=4`), so a poll always finds a free one.
@@ -76,6 +85,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: PiDP11ConfigEntry) -> bo
         _LOGGER.debug("Registered Lovelace card at %s", _CARD_URL)
 
     return True
+
+
+async def _async_options_updated(hass: HomeAssistant, entry: PiDP11ConfigEntry) -> None:
+    """Apply changed options: reload the entry so the coordinator is rebuilt with them."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: PiDP11ConfigEntry) -> bool:

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import math
 import re
 import socket
 import time
+from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import timedelta
@@ -23,11 +26,15 @@ from .const import (
     CURRENT_SYSTEM_PATH,
     DOMAIN,
     EVENT_LAMPS,
+    EVENT_LAMPS2,
     EVENT_SR_CHANGED,
     EVENT_SWITCH_CHANGED,
+    LAMP_FPS_DEFAULT,
     LAMP_PORT_OFFSET,
-    UPDATE_INTERVAL_SECONDS,
+    POLL_INTERVAL_DEFAULT,
     WATCH_PORT_OFFSET,
+    clamp_lamp_fps,
+    clamp_poll_interval,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -62,7 +69,14 @@ _BUSY_BACKOFF_MAX = 8.0
 _STREAM_BACKOFF_BASE = 10.0   # seconds before the first stream reconnect; doubles
 _STREAM_BACKOFF_MAX = 120.0
 _STREAM_AUTH_RETRY = 30.0
-_STREAM_AUTH_SR = " +sr"      # ask the shim for SR events on the lamp stream too
+# The lamp stream asks the shim for SR events (+sr) and for the live lamp feed
+# (+lamps fps=N). A shim that refuses the whole line is asked again with fewer
+# flags, one step at a time, so an older add-on still gets its lamps and SR.
+_FLAG_SR = "+sr"
+_FLAG_LAMPS = "+lamps"
+# Live lamp feed: lines "LAMPS2 <json>" with percent-on per lamp, at most fps per second.
+_LAMPS2_PREFIX = "LAMPS2 "
+_LAMPS2_WINDOW = 1.0          # seconds over which the fps cap is counted
 # When /share/pidp11/current_system is not on this machine, ask the add-on's
 # shim on the main port: `AUTH <secret> +system` answers `SYSTEM <name>`. An
 # add-on that does not answer that way is not asked again for a while.
@@ -98,12 +112,19 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
         host: str,
         port: int,
         secret: str,
+        *,
+        poll_interval: int = POLL_INTERVAL_DEFAULT,
+        lamp_fps: int = LAMP_FPS_DEFAULT,
     ) -> None:
+        # Both values are clamped here as well as in the options flow, so a
+        # hand-edited entry cannot ask for a 0 s poll or a 500 fps stream.
+        self.poll_interval = clamp_poll_interval(poll_interval)
+        self.lamp_fps = clamp_lamp_fps(lamp_fps)
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=UPDATE_INTERVAL_SECONDS),
+            update_interval=timedelta(seconds=self.poll_interval),
         )
         self.host = host
         self.port = port
@@ -112,9 +133,11 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
         # Kept for compatibility; the shared stream below uses the lamp port.
         self._watch_port = port + WATCH_PORT_OFFSET
         self._lamp_port = port + LAMP_PORT_OFFSET
-        # One long-lived stream carries both the lamps and the switch register.
+        # One long-lived stream carries the lamps, the live feed and the switch register.
         self._stream_task: asyncio.Task[None] | None = None
         self._stream_has_sr = False
+        # Monotonic times of the LAMPS2 events fired in the last window (fps cap).
+        self._lamps2_times: deque[float] = deque()
         # At most one transient connection (poll or command) at a time.
         self._conn_lock = asyncio.Lock()
         self._busy_logged = False
@@ -417,13 +440,23 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
         if self._stream_task:
             self._stream_task.cancel()
 
+    def _stream_auth_ladder(self) -> list[str]:
+        """Auth flag strings for the lamp stream, most features first."""
+        return [
+            f" {_FLAG_SR} {_FLAG_LAMPS} fps={self.lamp_fps}",  # SR and the live feed
+            f" {_FLAG_SR}",                                     # SR, old-format lamps
+            "",                                                 # lamps only; poll fires SR
+        ]
+
     async def _run_stream(self) -> None:
         """The one long-lived stream. Reconnects with backoff; closes on every exit."""
         delay = _STREAM_BACKOFF_BASE
-        auth_flags = _STREAM_AUTH_SR
+        ladder = self._stream_auth_ladder()
+        rung = 0
         while True:
             writer: asyncio.StreamWriter | None = None
             got_line = False
+            auth_flags = ladder[rung]
             try:
                 reader, conn = await asyncio.wait_for(
                     asyncio.open_connection(self.host, self._lamp_port),
@@ -435,17 +468,16 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
                 await conn.drain()
                 line = await asyncio.wait_for(reader.readline(), timeout=_AUTH_TIMEOUT)
                 if not line.startswith(b"OK"):
-                    if auth_flags and line.startswith(b"DENY"):
-                        # An add-on from before the shared stream: lamps only,
-                        # and the poll fires the SR events.
+                    if auth_flags and line.startswith(b"DENY") and rung < len(ladder) - 1:
+                        # An add-on that does not know these flags: try fewer.
                         _LOGGER.debug("Stream: shim refused %r; falling back", auth_flags)
-                        auth_flags = ""
+                        rung += 1
                         continue
                     _LOGGER.debug("Stream: auth failed on port %s", self._lamp_port)
                     await asyncio.sleep(_STREAM_AUTH_RETRY)
                     continue
                 _LOGGER.debug("Stream connected on port %s", self._lamp_port)
-                self._stream_has_sr = bool(auth_flags)
+                self._stream_has_sr = _FLAG_SR in auth_flags.split()
                 # No read timeout: a quiet machine legitimately sends nothing, and
                 # giving up on silence is what used to strand a SimH connection per
                 # reconnect. Dead peers are caught by TCP keepalive and by the
@@ -471,8 +503,46 @@ class PiDP11Coordinator(DataUpdateCoordinator[PiDP11State]):
         """Route one line from the shared stream; heartbeats and unknowns are ignored."""
         if msg.startswith("EVENT lamps "):
             self._handle_lamp_line(msg)
+        elif msg.startswith(_LAMPS2_PREFIX):
+            self._handle_lamps2_line(msg)
         elif msg.startswith("EVENT sr value="):
             await self._handle_watch_line(msg)
+
+    def _handle_lamps2_line(self, msg: str) -> None:
+        """Fire pidp11_lamps2 for one live lamp frame, at most lamp_fps per second.
+
+        A frame that is not valid JSON, has no integer seq or no leds object is
+        dropped. Each lamp is clamped to 0-100 percent; non-numeric values are
+        left out, so the card keeps the entity value for that lamp.
+        """
+        try:
+            payload = json.loads(msg[len(_LAMPS2_PREFIX):])
+        except ValueError:
+            _LOGGER.debug("Dropped a LAMPS2 line that is not JSON")
+            return
+        if not isinstance(payload, dict):
+            return
+        seq = payload.get("seq")
+        leds_in = payload.get("leds")
+        if isinstance(seq, bool) or not isinstance(seq, int) or not isinstance(leds_in, dict):
+            return
+
+        now = time.monotonic()
+        window = self._lamps2_times
+        while window and now - window[0] >= _LAMPS2_WINDOW:
+            window.popleft()
+        if len(window) >= self.lamp_fps:
+            return  # over the cap: the next frame carries the same state anyway
+        window.append(now)
+
+        leds: dict[str, float] = {}
+        for name, value in leds_in.items():
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                continue
+            if not math.isfinite(value):  # json accepts NaN and Infinity
+                continue
+            leds[str(name)] = min(max(float(value), 0.0), 100.0)
+        self.hass.bus.async_fire(EVENT_LAMPS2, {"seq": seq, "leds": leds})
 
     def _handle_lamp_line(self, msg: str) -> None:
         """Fire pidp11_lamps event for each EVENT lamps line from the stream."""

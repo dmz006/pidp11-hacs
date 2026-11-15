@@ -10,8 +10,16 @@
  *   Row 5: ADDR SELECT / DATA SELECT rotary position indicators
  *   Footer: System name + control switch buttons
  *
- * Live animation at 20 Hz via pidp11_lamps HA events (lamp watch port 2226).
- * LED updates use requestAnimationFrame without rebuilding innerHTML.
+ * Lamp feed. Two Home Assistant events drive the lamps:
+ *   pidp11_lamps2  live frames from the add-on: percent-on per lamp, up to the
+ *                  fps set in the integration options. Each lamp is drawn with
+ *                  brightness proportional to its percent. While frames keep
+ *                  arriving the header shows "live".
+ *   pidp11_lamps   the older PC/PSW snapshot (EVENT lamps). Drawn as before and
+ *                  marked "approximate".
+ * With no frame for 5 seconds the card falls back to the entity values (the
+ * poll) and shows "approximate". LED updates are coalesced into one
+ * requestAnimationFrame per frame, so the card never draws faster than events arrive.
  */
 
 (function () {
@@ -30,6 +38,13 @@
   // renamed entities still work.
   var DEVICE_OBJECT_RE = /^pidp_?11_/;
 
+  // A live frame older than this is no longer live (the card shows "approximate").
+  var STALE_MS = 5000;
+  // How often the card checks whether the live feed has gone quiet.
+  var LIVE_TICK_MS = 1000;
+  var EVENT_OLD = "pidp11_lamps";
+  var EVENT_LIVE = "pidp11_lamps2";
+
   // Domain and object-id suffix of each single-entity option.
   var SINGLE_ENTITY = {
     state_entity:    ["sensor", "cpu_state"],
@@ -40,6 +55,10 @@
   };
 
   function escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+  // Lamp names are compared without case, punctuation or underscores, so
+  // "P.PHY", "P_PHY" and "PPHY" are the same selector lamp.
+  function normLamp(s) { return String(s).toUpperCase().replace(/[^A-Z0-9]/g, ""); }
 
   // Smallest entity id in `states` of `domain` whose object id is under the device
   // prefix and ends in "_<suffix>", optionally followed by "_<n>". One pass, no
@@ -65,14 +84,17 @@
     return bits;
   }
 
-  // LED row. cls = type class ('adr' or 'dat') used by _updateLeds querySelectorAll.
-  function ledRow(bits, groups, cls) {
+  // LED row. cls = type class ('adr' or 'dat') used by _paintLamps. prefix names
+  // the lamps: the leftmost LED is the highest bit (ADDRESS21 .. ADDRESS0).
+  function ledRow(bits, groups, cls, prefix) {
     var html = '<div class="leds">';
     var idx = 0;
+    var total = bits.length;
     groups.forEach(function (count, gi) {
       if (gi > 0) html += '<span class="sep"></span>';
       for (var k = 0; k < count; k++, idx++) {
-        html += '<span class="led ' + cls + ' ' + (bits[idx] ? 'on' : 'off') + '"></span>';
+        html += '<span class="led lit ' + cls + '" data-lamp="' + prefix +
+                (total - 1 - idx) + '" data-fb="' + (bits[idx] ? 1 : 0) + '"></span>';
       }
     });
     return html + '</div>';
@@ -105,17 +127,18 @@
     return html + '</div>';
   }
 
-  // Single status-indicator LED with label below.
-  function si(on, lbl) {
-    return '<div class="si"><div class="sdot ' + (on ? 'on' : 'off') +
-           '"></div><div class="slbl">' + lbl + '</div></div>';
+  // Single status-indicator LED with label below. lamp is the add-on's lamp name.
+  function si(lamp, on, lbl) {
+    return '<div class="si"><div class="sdot lit" data-lamp="' + lamp +
+           '" data-fb="' + (on ? 1 : 0) + '"></div><div class="slbl">' + lbl + '</div></div>';
   }
 
-  // Rotary selector row.
-  function selRow(hdr, modes) {
+  // Rotary selector row. prefix is ADDR_SEL_ or DATA_SEL_; each position's lamp is
+  // the prefix plus the position label (see normLamp).
+  function selRow(hdr, prefix, modes) {
     var dots = modes.map(function (m) {
-      return '<div class="selitem"><div class="seldot' + (m.active ? ' on' : '') +
-             '"></div><div class="sellbl' + (m.active ? ' act' : '') + '">' +
+      return '<div class="selitem"><div class="seldot lit" data-lamp="' + prefix + normLamp(m.label) +
+             '" data-fb="' + (m.active ? 1 : 0) + '"></div><div class="sellbl' + (m.active ? ' act' : '') + '">' +
              m.label + '</div></div>';
     }).join('');
     return '<div class="selrow"><span class="selhdr">' + hdr +
@@ -142,8 +165,8 @@
       'display:flex;',
       'justify-content:space-between;',
       'align-items:center;',
-      'border-bottom:1px solid #2d0f0f',
-    '}',
+      'border-bottom:1px solid #2d0f0f'
+    + '}',
     '.logo{font-size:17px;font-style:italic;font-weight:300;color:#d8d0d0;letter-spacing:1px}',
     '.logo strong{font-style:normal;font-weight:700;color:#ffffff}',
     '.hdr-r{display:flex;flex-direction:column;align-items:flex-end;gap:1px}',
@@ -152,6 +175,9 @@
     '.cpustate.run{color:#dd4400}',
     '.cpustate.halt{color:#886060}',
     '.cpustate.off{color:#664444}',
+    /* Lamp feed marker: "live" while live frames arrive, "approximate" otherwise */
+    '.lmode{font-size:5.5px;letter-spacing:1.2px;text-transform:uppercase;color:#886060;margin-top:1px}',
+    '.lmode[data-mode="live"]{color:#ff7040}',
 
     /* Faceplate body */
     '.face{padding:10px 16px 14px;display:flex;flex-direction:column;gap:9px}',
@@ -161,10 +187,7 @@
     '.sigrp{display:flex;align-items:flex-end;gap:5px}',
     '.sigrp+.sigrp{margin-left:8px;padding-left:8px;border-left:1px solid #2d0f0f}',
     '.si{display:flex;flex-direction:column;align-items:center;gap:3px}',
-    '.sdot{width:8px;height:8px;border-radius:50%;border:1px solid #2a0808}',
-    '.sdot.on{background:radial-gradient(circle at 35% 35%,#ff7040,#ff2e00);',
-             'box-shadow:0 0 4px #ff2e00,0 0 8px rgba(255,46,0,.35)}',
-    '.sdot.off{background:#3d1010}',
+    '.sdot{width:8px;height:8px;border-radius:50%;border:1px solid #2a0808;background:#3d1010}',
     '.slbl{font-size:5.5px;color:#c8b8b8;text-transform:uppercase;letter-spacing:.3px;white-space:nowrap}',
     /* Addressing sub-group (label above) */
     '.amgrp{display:flex;flex-direction:column;align-items:center}',
@@ -183,12 +206,15 @@
     '.rlbl{font-size:7px;color:#d0c0c0;text-transform:uppercase;letter-spacing:2px}',
     '.rval{font-size:10px;font-family:"Courier New",monospace;color:#ff5520;letter-spacing:1px}',
 
-    /* LEDs */
+    /* LEDs. The well is always dark; a lit overlay on top carries the brightness
+       in --lv (0 to 1), which is the lamp's percent on the live feed. */
     '.leds{display:flex;align-items:center;gap:3px}',
-    '.led{display:inline-block;width:9px;height:9px;border-radius:50%;border:1px solid #1a0606;flex-shrink:0}',
-    '.led.on{background:radial-gradient(circle at 33% 33%,#ff7050,#ff2e00);',
-            'box-shadow:0 0 5px #ff2e00,0 0 10px rgba(255,46,0,.28)}',
-    '.led.off{background:#3d1010}',
+    '.led{display:inline-block;width:9px;height:9px;border-radius:50%;border:1px solid #1a0606;flex-shrink:0;background:#3d1010}',
+    '.lit{position:relative}',
+    '.lit::after{content:"";position:absolute;inset:0;border-radius:50%;',
+      'background:radial-gradient(circle at 33% 33%,#ff7050,#ff2e00);',
+      'box-shadow:0 0 5px #ff2e00,0 0 10px rgba(255,46,0,.28);',
+      'opacity:var(--lv,0);pointer-events:none}',
     '.sep{display:inline-block;width:5px;flex-shrink:0}',
 
     /* Parity group (DATA row, far left) */
@@ -227,7 +253,6 @@
     '.selmodes{display:flex;gap:4px;flex-wrap:wrap}',
     '.selitem{display:flex;flex-direction:column;align-items:center;gap:2px}',
     '.seldot{width:6px;height:6px;border-radius:50%;background:#2a0808;border:1px solid #1a0606}',
-    '.seldot.on{background:#ff2e00;box-shadow:0 0 3px #ff2e00}',
     '.sellbl{font-size:5.5px;color:#b0a0a0;text-transform:uppercase;white-space:nowrap}',
     '.sellbl.act{color:#ff6040}',
 
@@ -259,7 +284,11 @@
       this._found   = {};
       this._livePC  = 0;
       this._livePSW = 0;
-      this._lampSub = null;
+      this._lampSubs = null;   // the two event subscriptions (promises of unsubscribe)
+      this._frame    = null;   // latest live frame: normalized lamp name -> percent
+      this._frameAt  = 0;      // Date.now() of that frame
+      this._wasLive  = false;  // mode at the last paint, for the staleness tick
+      this._liveTimer = null;
       this._rafId   = null;
     }
 
@@ -298,17 +327,42 @@
     }
 
     _subscribeLamps() {
-      if (this._lampSub || !this._hass || !this.isConnected) return;
+      if (this._lampSubs || !this._hass || !this.isConnected) return;
       var self = this;
-      this._lampSub = this._hass.connection.subscribeEvents(
-        function (ev) { self._onLamp(ev); }, "pidp11_lamps"
-      );
+      this._lampSubs = [EVENT_OLD, EVENT_LIVE].map(function (type) {
+        return self._hass.connection.subscribeEvents(function (ev) {
+          if (type === EVENT_LIVE) self._onLampFrame(ev); else self._onLamp(ev);
+        }, type);
+      });
+      this._startLiveTimer();
     }
 
     _unsubscribeLamps() {
-      if (!this._lampSub) return;
-      Promise.resolve(this._lampSub).then(function (u) { try { u && u(); } catch (e) {} });
-      this._lampSub = null;
+      if (!this._lampSubs) return;
+      this._lampSubs.forEach(function (sub) {
+        Promise.resolve(sub).then(function (u) { try { u && u(); } catch (e) {} });
+      });
+      this._lampSubs = null;
+      this._stopLiveTimer();
+    }
+
+    _startLiveTimer() {
+      if (this._liveTimer) return;
+      var self = this;
+      this._liveTimer = setInterval(function () { self._tickLive(); }, LIVE_TICK_MS);
+    }
+
+    _stopLiveTimer() {
+      if (this._liveTimer) { clearInterval(this._liveTimer); this._liveTimer = null; }
+    }
+
+    // Repaints only when the feed goes live or quiet; nothing is drawn otherwise.
+    _tickLive() {
+      if (this._isLive() !== this._wasLive) this._schedulePaint();
+    }
+
+    _isLive() {
+      return this._frame !== null && Date.now() - this._frameAt < STALE_MS;
     }
 
     _st(id) {
@@ -339,37 +393,83 @@
       return configured;
     }
 
-    // Fast path — only update LED class names and octal value text.
-    // ADDRESS row uses 22 bits (PC zero-extended to PROG PHY 22-bit).
-    _updateLeds() {
-      var root = this.shadowRoot;
-      if (!root) return;
-      var adr  = root.querySelectorAll(".adr");
-      var dat  = root.querySelectorAll(".dat");
-      var pcB  = intToBits(this._livePC,  22);
-      var pswB = intToBits(this._livePSW, 16);
-      for (var i = 0; i < adr.length;  i++) adr[i].className  = "led adr "  + (pcB[i]  ? "on" : "off");
-      for (var j = 0; j < dat.length;  j++) dat[j].className  = "led dat "  + (pswB[j] ? "on" : "off");
-      var ep = root.querySelector(".rv-pc");
-      var ed = root.querySelector(".rv-ps");
-      if (ep) ep.textContent = this._livePC.toString(8).padStart(6, "0");
-      if (ed) ed.textContent = this._livePSW.toString(8).padStart(6, "0");
-    }
-
+    // Old format: PC/PSW snapshot. Values are kept; the lamps are drawn from them
+    // while no live frame is current.
     _onLamp(ev) {
       var d = ev.data;
       if (!d) return;
       var pc  = d.address !== undefined ? parseInt(d.address, 8) : this._livePC;
       var ps  = d.data    !== undefined ? parseInt(d.data,    8) : this._livePSW;
+      if (isNaN(pc)) pc = this._livePC;
+      if (isNaN(ps)) ps = this._livePSW;
       if (pc === this._livePC && ps === this._livePSW) return;
       this._livePC  = pc;
       this._livePSW = ps;
-      if (this._rafId) return;
-      var self = this;
-      this._rafId = requestAnimationFrame(function () { self._rafId = null; self._updateLeds(); });
+      this._schedulePaint();
     }
 
-    // Full DOM rebuild — runs at 5 s entity-update cadence.
+    // Live frame: {"seq": n, "leds": {"ADDRESS21": 0-100, ...}}. Only numeric
+    // values are kept; a lamp missing from the frame keeps its entity value.
+    _onLampFrame(ev) {
+      var d = ev && ev.data;
+      if (!d || typeof d !== "object" || !d.leds || typeof d.leds !== "object") return;
+      var map = {};
+      var names = Object.keys(d.leds);
+      for (var i = 0; i < names.length; i++) {
+        var v = d.leds[names[i]];
+        if (typeof v !== "number" || !isFinite(v)) continue;
+        map[normLamp(names[i])] = Math.min(100, Math.max(0, v));
+      }
+      this._frame   = map;
+      this._frameAt = Date.now();
+      this._schedulePaint();
+    }
+
+    // One paint per animation frame at most; events only mark the lamps dirty.
+    _schedulePaint() {
+      if (this._rafId) return;
+      var self = this;
+      this._rafId = requestAnimationFrame(function () {
+        self._rafId = null;
+        self._paintLamps();
+      });
+    }
+
+    // Sets --lv on every lamp: from the live frame when it is current, otherwise
+    // from the entity values (the old behaviour). Also refreshes the readouts and
+    // the live/approximate marker.
+    _paintLamps() {
+      var root = this.shadowRoot;
+      if (!root) return;
+      var live  = this._isLive();
+      var frame = live ? this._frame : null;
+      this._wasLive = live;
+
+      var pcB  = intToBits(this._livePC,  22);
+      var pswB = intToBits(this._livePSW, 16);
+      var i;
+      var adr = root.querySelectorAll(".adr");
+      for (i = 0; i < adr.length; i++) paintLamp(adr[i], pcB[i], frame);
+      var dat = root.querySelectorAll(".dat");
+      for (i = 0; i < dat.length; i++) paintLamp(dat[i], pswB[i], frame);
+      var rest = root.querySelectorAll(".lit:not(.adr):not(.dat)");
+      for (i = 0; i < rest.length; i++) {
+        paintLamp(rest[i], rest[i].getAttribute("data-fb") === "1" ? 1 : 0, frame);
+      }
+
+      var ep = root.querySelector(".rv-pc");
+      var ed = root.querySelector(".rv-ps");
+      if (ep) ep.textContent = this._livePC.toString(8).padStart(6, "0");
+      if (ed) ed.textContent = this._livePSW.toString(8).padStart(6, "0");
+
+      var mode = root.querySelector(".lmode");
+      if (mode) {
+        mode.textContent = live ? "live" : "approximate";
+        mode.setAttribute("data-mode", live ? "live" : "approximate");
+      }
+    }
+
+    // Full DOM rebuild — runs on every hass update (entity state change).
     _update() {
       if (!this._cfg || !this._hass) return;
 
@@ -423,6 +523,7 @@
           '<div class="hdr-r">' +
             '<div class="sysval">' + sys + '</div>' +
             '<div class="cpustate ' + stCls + '">' + stLbl + '</div>' +
+            '<div class="lmode" data-mode="approximate">approximate</div>' +
           '</div>' +
         '</div>' +
 
@@ -433,27 +534,27 @@
           '<div class="statrow">' +
             // Group 1 — system/CPU state
             '<div class="sigrp">' +
-              si(false, 'PAR ERR') +
-              si(false, 'ADRS ERR') +
-              si(running, 'RUN') +
-              si(false, 'PAUSE') +
-              si(false, 'MASTER') +
+              si('PAR_ERR', false, 'PAR ERR') +
+              si('ADRS_ERR', false, 'ADRS ERR') +
+              si('RUN', running, 'RUN') +
+              si('PAUSE', false, 'PAUSE') +
+              si('MASTER', false, 'MASTER') +
             '</div>' +
             // Group 2 — privilege mode
             '<div class="sigrp">' +
-              si(mode === 'user',       'USER') +
-              si(mode === 'supervisor', 'SUPER') +
-              si(mode === 'kernel',     'KERNEL') +
-              si(false, 'DATA') +
+              si('USER', mode === 'user', 'USER') +
+              si('SUPER', mode === 'supervisor', 'SUPER') +
+              si('KERNEL', mode === 'kernel', 'KERNEL') +
+              si('DATA_SPACE', false, 'DATA') +
             '</div>' +
             // Group 3 — addressing mode (PDP-11/70 always uses 22-bit)
             '<div class="sigrp">' +
               '<div class="amgrp">' +
                 '<div class="amlbl">ADDRESSING</div>' +
                 '<div class="aminner">' +
-                  si(false,    '16') +
-                  si(false,    '18') +
-                  si(!offline, '22') +
+                  si('ADDRESSING_16', false, '16') +
+                  si('ADDRESSING_18', false, '18') +
+                  si('ADDRESSING_22', !offline, '22') +
                 '</div>' +
               '</div>' +
             '</div>' +
@@ -463,7 +564,7 @@
           '<div class="regrow">' +
             '<div class="segbar addr"></div>' +
             '<div class="reginner">' +
-              ledRow(pcB, G22, 'adr') +
+              ledRow(pcB, G22, 'adr', 'ADDRESS') +
               '<div class="regright">' +
                 '<span class="rlbl">ADDRESS</span>' +
                 '<span class="rval rv-pc">' + pcD + '</span>' +
@@ -476,11 +577,14 @@
             '<div class="segbar data"></div>' +
             '<div class="reginner">' +
               '<div class="pargrp">' +
-                '<div class="pardots"><div class="pardot"></div><div class="pardot"></div></div>' +
+                '<div class="pardots">' +
+                  '<div class="pardot lit" data-lamp="PARITY_HIGH" data-fb="0"></div>' +
+                  '<div class="pardot lit" data-lamp="PARITY_LOW" data-fb="0"></div>' +
+                '</div>' +
                 '<div class="parhl"><span>H</span><span>L</span></div>' +
                 '<div class="parlbl">PAR</div>' +
               '</div>' +
-              ledRow(pswB, G16, 'dat') +
+              ledRow(pswB, G16, 'dat', 'DATA') +
               '<div class="regright">' +
                 '<span class="rlbl">DATA</span>' +
                 '<span class="rval rv-ps">' + pswD + '</span>' +
@@ -498,8 +602,8 @@
 
           // Row 5: Rotary selector indicators
           '<div class="selsec">' +
-            selRow('ADDR', addrModes) +
-            selRow('DATA', dataModes) +
+            selRow('ADDR', 'ADDR_SEL_', addrModes) +
+            selRow('DATA', 'DATA_SEL_', dataModes) +
           '</div>' +
 
         '</div>' +
@@ -523,7 +627,21 @@
         '</div>' +
 
         '</div>';
+
+      this._paintLamps();
     }
+  }
+
+  // One lamp: brightness is the live percent when the frame has the lamp, otherwise
+  // the fallback bit (0 or 1) from the entity values.
+  function paintLamp(el, fallbackBit, frame) {
+    var v = fallbackBit ? 1 : 0;
+    var name = el.getAttribute("data-lamp");
+    if (frame && name) {
+      var pct = frame[normLamp(name)];
+      if (pct !== undefined) v = pct / 100;
+    }
+    el.style.setProperty("--lv", String(v));
   }
 
   customElements.define("pidp11-panel-card", PiDP11PanelCard);
@@ -532,7 +650,7 @@
   window.customCards.push({
     type:             "pidp11-panel-card",
     name:             "PiDP-11 Front Panel",
-    description:      "Faithful PDP-11/70 front panel — 22 ADDRESS LEDs, status row, SR toggles, rotary selectors, 20 Hz live animation.",
+    description:      "Faithful PDP-11/70 front panel — 22 ADDRESS LEDs, status row, SR toggles, rotary selectors, live lamp feed.",
     preview:          true,
     documentationURL: "https://github.com/dmz006/pidp11-hacs",
   });

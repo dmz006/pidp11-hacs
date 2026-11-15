@@ -6,6 +6,15 @@ AGENT.md §7.
 
 ## [Unreleased]
 
+### Added
+- Options flow (Settings → Devices & services → PiDP-11 → Configure): poll interval, 1 to 60 s
+  (default 5), and lamp refresh rate, 5 to 20 fps (default 10, recommended). Saving reloads the
+  integration; no restart. More than 20 fps is refused.
+- Live lamp feed: the lamp stream asks for `+lamps fps=N` and turns each `LAMPS2` frame into a
+  `pidp11_lamps2` event, at most `lamp_fps` per second. The card draws each lamp at its percent,
+  with a "live" marker while frames arrive and "approximate" after 5 s without one or when only the
+  older `pidp11_lamps` snapshot arrives. Older add-ons keep working; the stream falls back to fewer flags.
+
 ### Fixed
 - Dashboard card never rendered in Home Assistant: it is now a real custom element
   (`extends HTMLElement`), so Lovelace's `document.createElement` gets `setConfig`/`hass`.
@@ -34,6 +43,7 @@ AGENT.md §7.
 - Reload the `pidp11-panel-card.js` resource (clear the browser cache) after upgrading.
 
 ### Changed
+- The fixed 5 s poll interval is now the poll interval option (`UPDATE_INTERVAL_SECONDS` is gone).
 - The SR watch now rides the lamp stream (port 2226, `AUTH <secret> +sr`); port 2225 stays for old clients.
 - Entity ids in the README: `sensor.pidp_11_switch_register`, `binary_sensor.pidp_11_cpu_halted`.
 - Tests: Node/jsdom card tests under `tests/card` (`npm ci`).

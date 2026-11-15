@@ -82,9 +82,10 @@ def test_setConfig_then_hass_renders_shadow_root(card_report: dict[str, Any]) ->
     assert card_report["rvPc"] == "000200", card_report["rvPc"]
 
 
-def test_hass_subscribes_to_lamp_feed(card_report: dict[str, Any]) -> None:
-    assert card_report["subscribed"] == 1, _errors(card_report)
+def test_hass_subscribes_to_both_lamp_feeds(card_report: dict[str, Any]) -> None:
+    # pidp11_lamps (old format) and pidp11_lamps2 (live frames): one subscription each.
+    assert card_report["subscribed"] == 2, _errors(card_report)
 
 
-def test_disconnect_releases_lamp_feed(card_report: dict[str, Any]) -> None:
-    assert card_report["unsubscribed"] == 1, _errors(card_report)
+def test_disconnect_releases_both_lamp_feeds(card_report: dict[str, Any]) -> None:
+    assert card_report["unsubscribed"] == 2, _errors(card_report)

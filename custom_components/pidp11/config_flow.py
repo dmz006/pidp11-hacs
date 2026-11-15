@@ -7,7 +7,8 @@ import logging
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
+from homeassistant.core import callback
 
 from .const import (
     CONF_HOST,
@@ -18,6 +19,7 @@ from .const import (
     DOMAIN,
     SHARED_SECRET_PATH,
 )
+from .options_flow import PiDP11OptionsFlow
 
 try:  # HA >= 2025.2 moved the class; the old location was later removed.
     from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
@@ -76,6 +78,12 @@ class PiDP11ConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
     """Handle a config flow for PiDP-11."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
+        """Poll interval and lamp refresh rate."""
+        return PiDP11OptionsFlow()
 
     def __init__(self) -> None:
         super().__init__()

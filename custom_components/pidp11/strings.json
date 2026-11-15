@@ -97,5 +97,21 @@
       "name": "Examine",
       "description": "Read a word from PDP-11 memory at the given octal address."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "PiDP-11 options",
+        "description": "Lower poll intervals and higher lamp rates load the Pi and the phone more. 10 fps is the recommended lamp rate; more than 20 fps is excessive.",
+        "data": {
+          "poll_interval_seconds": "Poll interval (seconds)",
+          "lamp_fps": "Lamp refresh rate (frames per second)"
+        },
+        "data_description": {
+          "poll_interval_seconds": "How often the integration reads the CPU state and registers, 1 to 60 seconds. Default 5.",
+          "lamp_fps": "How many times per second the front panel lamps are updated, 5 to 20. Default and recommended: 10."
+        }
+      }
+    }
   }
 }

@@ -95,8 +95,8 @@ if (el) {
   }
 
   // 5. Feed hass the way Lovelace does: states plus a connection with
-  //    subscribeEvents. The lamp feed subscription is counted and its
-  //    unsubscribe function is counted when called.
+  //    subscribeEvents. Each lamp feed subscription (pidp11_lamps and
+  //    pidp11_lamps2) is counted and its unsubscribe function is counted when called.
   const states = {
     "sensor.pidp11_cpu_state": { state: "running" },
     "sensor.pidp11_pc": { state: "000200" },
