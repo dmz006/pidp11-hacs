@@ -49,6 +49,11 @@ ADDRESS and DATA LEDs animate at **up to 20 Hz** via the dedicated lamp stream (
 The 5 s coordinator tick still updates status indicators, CPU mode, system name, and SR
 switch positions.
 
+The current system name is read in an executor job, never on the event loop. When the
+add-on runs on another machine, the integration asks it over the remote console with
+`AUTH <secret> +system`, answered by `SYSTEM <name>`. The local file
+`/share/pidp11/current_system` is only the same-machine fallback.
+
 If the card shows no values, see [Troubleshooting](#troubleshooting).
 
 ### Optional entity overrides

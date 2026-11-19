@@ -10,3 +10,4 @@
 - **Idle timeout** — `IDLE_TIMEOUT`; closes a proxied console session with no traffic.
 - **Entity prefix** — `pidp_11` for the "PiDP-11" device (older installs: `pidp11`); the card resolves either.
 - **Card** — `custom:pidp11-panel-card`, the Lovelace front-panel replica. See README [Dashboard Card](../README.md#dashboard-card).
+- **Current system** — the booted OS name behind `sensor.pidp_11_system`. The file `/share/pidp11/current_system` is read in an executor job, never on the event loop; if it is absent (add-on on another machine) the integration asks the add-on with `AUTH <secret> +system`, answered by `SYSTEM <name>`. See [architecture](architecture.md).

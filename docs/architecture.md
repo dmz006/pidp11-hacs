@@ -82,6 +82,12 @@ port (default 2223). Provides:
   service command at a time. Connections are always closed in a `finally`, the
   stream is cancelled on unload, and when SimH answers "All connections busy" the
   poll backs off and the entities keep their last values.
+- Current system lookup — the `system` field is read in an executor job
+  (`hass.async_add_executor_job`), never on the event loop, because the file read
+  blocks. When the add-on is on another machine, the system name
+  is obtained via the remote console: `AUTH <secret> +system` is answered by
+  `SYSTEM <name>`. The local file `/share/pidp11/current_system` is only the
+  same-machine fallback.
 - `sensor.py` — `cpu_state`, `pc`, `psw`, `system`, `sr` (+ binary/decimal/bit
   attributes), `cpu_mode` (kernel/supervisor/user).
 - `binary_sensor.py` — `halted`, plus 22 SR bit sensors `SR0`–`SR21`.

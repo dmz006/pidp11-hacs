@@ -43,7 +43,7 @@ entity id starts with `pidp_11_`. Developer Tools → States, filter `pidp_11`
 | `sensor.pidp_11_cpu_state` | `running` or `halted` (`offline` = no answer from SimH) |
 | `sensor.pidp_11_pc` | octal program counter, changes while running |
 | `sensor.pidp_11_psw` | octal PSW |
-| `sensor.pidp_11_system` | booted OS, e.g. `211bsd`, `idled` |
+| `sensor.pidp_11_system` | booted OS, e.g. `211bsd`, `idled`. Read off the event loop; from `/share/pidp11/current_system` on the same machine, otherwise asked of the add-on (`AUTH <secret> +system` → `SYSTEM <name>`). Stuck on a stale value with a remote add-on: check the add-on is current (step 4) |
 | `sensor.pidp_11_cpu_mode` | `kernel` / `supervisor` / `user` |
 | `sensor.pidp_11_switch_register` | octal, attributes `SR0`–`SR21` |
 | `binary_sensor.pidp_11_cpu_halted` | `on` only when halted |
