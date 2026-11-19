@@ -402,3 +402,30 @@ async def test_coordinator_gets_the_name_from_the_real_shim(
         server.close()
     assert name == "idled"
     assert shim_env["opened"] == []
+
+
+async def test_current_system_file_is_opened_off_the_event_loop(
+    hass: Any, addon_factory: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    quick_timings: None,
+) -> None:
+    """Record the thread that actually opens the file, not just the reader's caller."""
+    path = _system_file(tmp_path, monkeypatch, "211bsd")
+    addon = await addon_factory("idled")
+    loop_thread = threading.get_ident()
+    open_threads: list[int] = []
+    real_open = open
+
+    def spy_open(file: Any, *args: Any, **kwargs: Any) -> Any:
+        if str(file) == str(path):
+            open_threads.append(threading.get_ident())
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", spy_open)
+    coord = _coord(hass, addon.port)
+    try:
+        await coord.async_refresh()
+    finally:
+        await coord.async_shutdown()
+
+    assert open_threads, "the system file was never opened"
+    assert loop_thread not in open_threads
